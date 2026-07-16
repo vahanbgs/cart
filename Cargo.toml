@@ -1,0 +1,20 @@
+[package]
+name = "cart"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+chrono = { version = "0.4.45", features = ["serde"] }
+directories-next = "2.0.0"
+futures = "0.3.32"
+hex = { version = "0.4.3", features = ["serde"] }
+reqwest = { version = "0.13.4", features = ["json", "stream"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sha1 = "0.11.0"
+strum = { version = "0.28.0", features = ["derive"] }
+tokio = { version = "1.52.3", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["chrono", "json", "serde", "serde_json", "tracing", "tracing-serde", "fmt", "env-filter", "regex"] }
+url = { version = "2.5.8", features = ["serde"] }
