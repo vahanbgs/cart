@@ -9,11 +9,15 @@ use std::{
 };
 
 use anyhow::bail;
-use cart::piston::{
-    Action, AssetIndex, AssetManifest, FileSystemEntry, GameJarDownloadOptions,
-    JavaDistributionListManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent,
-    NativeClassifier, Os, VersionInfo, VersionListManifest, VersionManifest,
+use cart::{
+    CartManifest, Cli,
+    piston::{
+        Action, AssetIndex, AssetManifest, FileSystemEntry, GameJarDownloadOptions,
+        JavaDistributionListManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent,
+        NativeClassifier, Os, VersionInfo, VersionListManifest, VersionManifest,
+    },
 };
+use clap::Parser;
 use directories_next::ProjectDirs;
 use reqwest::Client;
 use tokio::{fs, process::Command};
@@ -204,7 +208,9 @@ async fn build_class_path(
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let version = "26.2";
+    let cli = Cli::parse();
+    let mut cart_manifest = CartManifest::default();
+    cart_manifest.override_with(&cli);
 
     let Some(project_dirs) = ProjectDirs::from("", "", "cart") else {
         bail!("Could not find valid home directory path")
@@ -222,6 +228,12 @@ async fn main() -> anyhow::Result<()> {
         .iter()
         .map(|version| (version.id.to_owned(), version.to_owned()))
         .collect::<HashMap<String, VersionInfo>>();
+
+    let version = if cart_manifest.minecraft_version() == "latest" {
+        &version_list_manifest.latest.release
+    } else {
+        cart_manifest.minecraft_version()
+    };
 
     let version_info = &version_map[version];
     let version_manifest = cache
