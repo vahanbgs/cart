@@ -138,14 +138,59 @@ async fn fetch_assets(asset_index: &AssetIndex, cache: &Cache<'_>) -> anyhow::Re
 }
 
 async fn fetch_game_client_jar(
-    game_jar_download_options: GameJarDownloadOptions,
+    game_jar_download_options: &GameJarDownloadOptions,
     cache: &Cache<'_>,
 ) -> anyhow::Result<PathBuf> {
-    let download_entry = game_jar_download_options.client;
+    let download_entry = &game_jar_download_options.client;
 
     cache
         .fetch(&download_entry.url, Some(&download_entry.sha1))
         .await
+}
+
+async fn build_class_path(
+    version_manifest: &VersionManifest,
+    cache: &Cache<'_>,
+) -> anyhow::Result<String> {
+    let game_client_jar_path = fetch_game_client_jar(&version_manifest.downloads, &cache).await?;
+
+    let mut classpath = vec![game_client_jar_path.to_string_lossy().into_owned()];
+
+    for library_entry in &version_manifest.libraries {
+        let mut allow = library_entry.rules.is_none();
+
+        if let Some(rules) = &library_entry.rules {
+            allow = rules.is_empty();
+
+            for rule in rules {
+                let mut rule_applies = true;
+
+                if let Some(os) = &rule.os {
+                    rule_applies &= match os {
+                        Os::Arch { arch: _ } => true,
+                        Os::Name { name } => name.matches_current_platform(),
+                    }
+                }
+
+                rule_applies &= matches!(rule.features, None);
+
+                if rule_applies {
+                    allow = rule.action == Action::Allow;
+                }
+            }
+        }
+
+        if !allow {
+            continue;
+        }
+
+        if let Some(artifact) = &library_entry.downloads.artifact {
+            let path = cache.fetch(&artifact.url, Some(&artifact.sha1)).await?;
+            classpath.push(path.to_string_lossy().into_owned());
+        }
+    }
+
+    Ok(classpath.join(":"))
 }
 
 #[tokio::main]
@@ -176,54 +221,19 @@ async fn main() -> anyhow::Result<()> {
         .fetch_json::<VersionManifest>(&version_info.url, Some(&version_info.sha1))
         .await?;
 
-    let asset_index = version_manifest.asset_index;
+    let asset_index = &version_manifest.asset_index;
 
     let assets_path = fetch_assets(&asset_index, &cache).await?;
     let java_path =
         fetch_java_distribution(version_manifest.java_version.component, &cache).await?;
-    let game_client_jar_path = fetch_game_client_jar(version_manifest.downloads, &cache).await?;
 
-    let mut classpath = vec![game_client_jar_path.to_str().unwrap().to_owned()];
-
-    for library_entry in version_manifest.libraries {
-        let mut allow = library_entry.rules.is_none();
-
-        if let Some(rules) = library_entry.rules {
-            allow = rules.is_empty();
-
-            for rule in rules {
-                let mut rule_applies = true;
-
-                if let Some(os) = rule.os {
-                    rule_applies &= match os {
-                        Os::Arch { arch: _ } => true,
-                        Os::Name { name } => name.matches_current_platform(),
-                    }
-                }
-
-                rule_applies &= matches!(rule.features, None);
-
-                if rule_applies {
-                    allow = rule.action == Action::Allow;
-                }
-            }
-        }
-
-        if !allow {
-            continue;
-        }
-
-        if let Some(artifact) = library_entry.downloads.artifact {
-            let path = cache.fetch(&artifact.url, Some(&artifact.sha1)).await?;
-            classpath.push(path.to_str().unwrap().to_owned());
-        }
-    }
+    let classpath = build_class_path(&version_manifest, &cache).await?;
 
     Command::new(java_path.join("bin").join("java"))
         .arg("-Xmx4G")
         .arg("-Xms1G")
         .arg("-cp")
-        .arg(classpath.join(":"))
+        .arg(classpath)
         .arg(version_manifest.main_class)
         .arg("--username")
         .arg("OfflinePlayer")
@@ -234,7 +244,7 @@ async fn main() -> anyhow::Result<()> {
         .arg("--assetsDir")
         .arg(assets_path)
         .arg("--assetIndex")
-        .arg(asset_index.id)
+        .arg(&asset_index.id)
         .arg("--uuid")
         .arg("00000000-0000-0000-0000-000000000000")
         .arg("--accessToken")
