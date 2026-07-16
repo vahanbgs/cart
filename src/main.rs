@@ -246,6 +246,7 @@ async fn main() -> anyhow::Result<()> {
     let manifest_path = resolve_manifest_path(&cli).await?;
     let mut cart_manifest = load_manifest_file(&manifest_path).await?;
     cart_manifest.override_with(&cli);
+    let manifest_directory = manifest_path.parent().unwrap();
 
     let Some(project_dirs) = ProjectDirs::from("", "", "cart") else {
         bail!("Could not find valid home directory path")
@@ -284,6 +285,7 @@ async fn main() -> anyhow::Result<()> {
     let classpath = build_class_path(&version_manifest, &cache).await?;
 
     Command::new(java_path.join("bin").join("java"))
+        .current_dir(manifest_directory)
         .arg("-Xmx4G")
         .arg("-Xms1G")
         .arg("-cp")
