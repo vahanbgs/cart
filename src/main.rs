@@ -11,8 +11,8 @@ use std::{
 use anyhow::bail;
 use cart::piston::{
     Action, AssetIndex, AssetManifest, FileSystemEntry, GameJarDownloadOptions,
-    JavaDistributionListManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent, Os,
-    VersionInfo, VersionListManifest, VersionManifest,
+    JavaDistributionListManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent,
+    NativeClassifier, Os, VersionInfo, VersionListManifest, VersionManifest,
 };
 use directories_next::ProjectDirs;
 use reqwest::Client;
@@ -187,6 +187,13 @@ async fn build_class_path(
         if let Some(artifact) = &library_entry.downloads.artifact {
             let path = cache.fetch(&artifact.url, Some(&artifact.sha1)).await?;
             classpath.push(path.to_string_lossy().into_owned());
+        }
+
+        if let Some(native) = &library_entry.downloads.classifiers {
+            if let Some(native) = native.get(&NativeClassifier::current()) {
+                // Not handling older versions correctly for now
+                cache.fetch(&native.url, Some(&native.sha1)).await?;
+            }
         }
     }
 

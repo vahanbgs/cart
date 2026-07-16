@@ -121,8 +121,9 @@ impl OsName {
 #[strum(serialize_all = "kebab-case")]
 pub enum NativeClassifier {
     NativesLinux,
+    #[serde(alias = "natives-osx")]
     NativesMacos,
-    NativesOsx,
+    // NativesOsx,
     NativesWindows,
     #[serde(rename = "natives-windows-32")]
     #[strum(serialize = "natives-windows-32")]
@@ -136,12 +137,33 @@ pub enum NativeClassifier {
 }
 
 impl NativeClassifier {
+    pub const fn current() -> Self {
+        #[cfg(target_os = "linux")]
+        {
+            Self::NativesLinux
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            Self::NativesMacos
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            if cfg!(target_pointer_width = "64") {
+                Self::NativesWindows64
+            } else {
+                Self::NativesWindows32
+            }
+        }
+    }
+
     pub fn matches_current_platform(self) -> bool {
         match self {
             Self::NativesLinux => {
                 cfg!(target_os = "linux")
             }
-            Self::NativesMacos | Self::NativesOsx => {
+            Self::NativesMacos /* | Self::NativesOsx */ => {
                 cfg!(target_os = "macos")
             }
             Self::NativesWindows => {
