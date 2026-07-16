@@ -18,7 +18,7 @@ impl<'a> Cache<'a> {
         Self { path, client }
     }
 
-    pub fn path(&self) -> &Path {
+    pub fn directory(&self) -> &Path {
         &self.path
     }
 
@@ -37,7 +37,7 @@ impl<'a> Cache<'a> {
         url: &Url,
         expected_digest: Option<&Sha1Digest>,
     ) -> anyhow::Result<PathBuf> {
-        let path = self.cache_path_from_url(url)?;
+        let path = self.path_from_url(url)?;
 
         let Some(parent_directory_path) = path.parent() else {
             bail!("Path '{:?}' has no parent directory.", path);
@@ -80,7 +80,7 @@ impl<'a> Cache<'a> {
         Ok(path)
     }
 
-    fn cache_path_from_url(&self, url: &Url) -> anyhow::Result<PathBuf> {
+    fn path_from_url(&self, url: &Url) -> anyhow::Result<PathBuf> {
         let Origin::Tuple(_, host, _) = url.origin() else {
             bail!("Could not extract host from URL: {}", url);
         };

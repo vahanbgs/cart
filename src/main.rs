@@ -1,18 +1,22 @@
 mod cache;
 
 use std::{
-    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, str::FromStr,
+    collections::HashMap,
+    fs::Permissions,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use anyhow::bail;
 use cart::piston::{
-    AssetIndex, AssetManifest, FileSystemEntry, JavaDistributionListManifest,
-    JavaDistributionManifest, JavaPlatform, JavaVersionComponent, VersionInfo, VersionListManifest,
-    VersionManifest,
+    Action, AssetIndex, AssetManifest, FileSystemEntry, GameJarDownloadOptions,
+    JavaDistributionListManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent, Os,
+    VersionInfo, VersionListManifest, VersionManifest,
 };
 use directories_next::ProjectDirs;
 use reqwest::Client;
-use tokio::fs;
+use tokio::{fs, process::Command};
 use url::Url;
 
 use cache::Cache;
@@ -39,10 +43,10 @@ async fn fetch_java_distribution_list_manifest(
     cache.fetch_json(&url, None).await
 }
 
-async fn download_java_distribution(
+async fn fetch_java_distribution(
     java_version_component: JavaVersionComponent,
     cache: &Cache<'_>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<PathBuf> {
     let java_distribution_list_manifest = fetch_java_distribution_list_manifest(cache).await?;
 
     let java_distribution_info =
@@ -56,7 +60,7 @@ async fn download_java_distribution(
         .await?;
 
     let java_distribution_path = cache
-        .path()
+        .directory()
         .join("java")
         .join(java_version_component.as_ref());
 
@@ -86,15 +90,15 @@ async fn download_java_distribution(
         }
     }
 
-    Ok(())
+    Ok(java_distribution_path)
 }
 
-async fn download_assets(asset_index: &AssetIndex, cache: &Cache<'_>) -> anyhow::Result<()> {
+async fn fetch_assets(asset_index: &AssetIndex, cache: &Cache<'_>) -> anyhow::Result<PathBuf> {
     let asset_manifest = cache
         .fetch_json::<AssetManifest>(&asset_index.url, Some(&asset_index.sha1))
         .await?;
 
-    let assets_path = cache.path().join("assets");
+    let assets_path = cache.directory().join("assets");
     let assets_indexes_path = assets_path.join("indexes");
     let assets_objects_path = assets_path.join("objects");
 
@@ -130,7 +134,18 @@ async fn download_assets(asset_index: &AssetIndex, cache: &Cache<'_>) -> anyhow:
         fs::symlink("../resources.download.minecraft.net/", &assets_objects_path).await?;
     }
 
-    Ok(())
+    Ok(assets_path)
+}
+
+async fn fetch_game_client_jar(
+    game_jar_download_options: GameJarDownloadOptions,
+    cache: &Cache<'_>,
+) -> anyhow::Result<PathBuf> {
+    let download_entry = game_jar_download_options.client;
+
+    cache
+        .fetch(&download_entry.url, Some(&download_entry.sha1))
+        .await
 }
 
 #[tokio::main]
@@ -161,21 +176,73 @@ async fn main() -> anyhow::Result<()> {
         .fetch_json::<VersionManifest>(&version_info.url, Some(&version_info.sha1))
         .await?;
 
-    download_assets(&version_manifest.asset_index, &cache).await?;
-    download_java_distribution(version_manifest.java_version.component, &cache).await?;
+    let asset_index = version_manifest.asset_index;
 
-    // let mut classpath = Vec::new();
+    let assets_path = fetch_assets(&asset_index, &cache).await?;
+    let java_path =
+        fetch_java_distribution(version_manifest.java_version.component, &cache).await?;
+    let game_client_jar_path = fetch_game_client_jar(version_manifest.downloads, &cache).await?;
 
-    // for library_entry in version_manifest.libraries {
-    //     fetch(
-    //         library_entry.downloads.artifact,
-    //         cache_dir,
-    //         &client,
-    //         expected_digest,
-    //     )
-    //     .await?;
-    //     let Some(rules) = library_entry.rules else {};
-    // }
+    let mut classpath = vec![game_client_jar_path.to_str().unwrap().to_owned()];
+
+    for library_entry in version_manifest.libraries {
+        let mut allow = library_entry.rules.is_none();
+
+        if let Some(rules) = library_entry.rules {
+            allow = rules.is_empty();
+
+            for rule in rules {
+                let mut rule_applies = true;
+
+                if let Some(os) = rule.os {
+                    rule_applies &= match os {
+                        Os::Arch { arch: _ } => true,
+                        Os::Name { name } => name.matches_current_platform(),
+                    }
+                }
+
+                rule_applies &= matches!(rule.features, None);
+
+                if rule_applies {
+                    allow = rule.action == Action::Allow;
+                }
+            }
+        }
+
+        if !allow {
+            continue;
+        }
+
+        if let Some(artifact) = library_entry.downloads.artifact {
+            let path = cache.fetch(&artifact.url, Some(&artifact.sha1)).await?;
+            classpath.push(path.to_str().unwrap().to_owned());
+        }
+    }
+
+    Command::new(java_path.join("bin").join("java"))
+        .arg("-Xmx4G")
+        .arg("-Xms1G")
+        .arg("-cp")
+        .arg(classpath.join(":"))
+        .arg(version_manifest.main_class)
+        .arg("--username")
+        .arg("OfflinePlayer")
+        .arg("--version")
+        .arg(version)
+        .arg("--gameDir")
+        .arg("minecraft/")
+        .arg("--assetsDir")
+        .arg(assets_path)
+        .arg("--assetIndex")
+        .arg(asset_index.id)
+        .arg("--uuid")
+        .arg("00000000-0000-0000-0000-000000000000")
+        .arg("--accessToken")
+        .arg("0")
+        .arg("--userType")
+        .arg("legacy")
+        .status()
+        .await?;
 
     Ok(())
 }

@@ -98,12 +98,22 @@ pub enum Arch {
     X86,
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OsName {
     Linux,
     Osx,
     Windows,
+}
+
+impl OsName {
+    pub fn matches_current_platform(self) -> bool {
+        match self {
+            OsName::Linux => cfg!(target_os = "linux"),
+            OsName::Osx => cfg!(target_os = "macos"),
+            OsName::Windows => cfg!(target_os = "windows"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Deserialize, AsRefStr)]
@@ -202,7 +212,7 @@ pub struct LibraryDownloadOptions {
     pub classifiers: Option<HashMap<NativeClassifier, LibraryDownloadEntry>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
     Allow,
