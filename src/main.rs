@@ -1,6 +1,4 @@
-mod launcher;
-
-use launcher::Launcher;
+use cart::Launcher;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -8,5 +6,7 @@ async fn main() -> anyhow::Result<()> {
 
     let launcher = Launcher::new();
 
-    launcher.launch().await
+    launcher.launch().await?;
+
+    Ok(())
 }

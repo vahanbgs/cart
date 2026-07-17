@@ -9,8 +9,7 @@ use std::{
     str::FromStr,
 };
 
-use anyhow::bail;
-use cart::{
+use crate::{
     CartManifest, Cli,
     piston::{
         Action, AssetIndex, AssetManifest, FileSystemEntry, GameJarDownloadOptions,
@@ -18,6 +17,7 @@ use cart::{
         NativeClassifier, Os, VersionInfo, VersionListManifest, VersionManifest,
     },
 };
+use anyhow::bail;
 use clap::Parser;
 use directories_next::ProjectDirs;
 use reqwest::Client;

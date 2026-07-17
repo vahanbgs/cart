@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;
-use cart::Sha1Digest;
 use futures::StreamExt;
 use reqwest::Client;
 use sha1::{Digest, Sha1};
 use tokio::{fs, io::AsyncWriteExt};
 use url::{Origin, Url};
+
+use crate::Sha1Digest;
 
 pub struct Cache<'a> {
     path: PathBuf,

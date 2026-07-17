@@ -1,9 +1,11 @@
 mod cli;
 mod config;
+mod launcher;
 pub mod piston;
 
 pub use cli::Cli;
 pub use config::CartManifest;
+pub use launcher::Launcher;
 
 use serde::{Deserialize, Serialize};
 
