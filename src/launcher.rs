@@ -246,81 +246,89 @@ async fn load_manifest_file(path: &Path) -> anyhow::Result<CartManifest> {
     Ok(manifest)
 }
 
-pub async fn launch() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+pub struct Launcher {}
 
-    let manifest_path = resolve_manifest_path(&cli).await?;
-    let mut cart_manifest = load_manifest_file(&manifest_path).await?;
-    cart_manifest.override_with(&cli);
-    let manifest_directory = manifest_path.parent().unwrap();
+impl Launcher {
+    pub fn new() -> Self {
+        Self {}
+    }
 
-    let Some(project_dirs) = ProjectDirs::from("", "", "cart") else {
-        bail!("Could not find valid home directory path")
-    };
+    pub async fn launch(&self) -> anyhow::Result<()> {
+        let cli = Cli::parse();
 
-    let cache_dir = project_dirs.cache_dir();
+        let manifest_path = resolve_manifest_path(&cli).await?;
+        let mut cart_manifest = load_manifest_file(&manifest_path).await?;
+        cart_manifest.override_with(&cli);
+        let manifest_directory = manifest_path.parent().unwrap();
 
-    let client = Client::new();
-    let cache = Cache::new(cache_dir.to_path_buf(), &client);
+        let Some(project_dirs) = ProjectDirs::from("", "", "cart") else {
+            bail!("Could not find valid home directory path")
+        };
 
-    let version_list_manifest = fetch_version_list_manifest(&cache).await?;
+        let cache_dir = project_dirs.cache_dir();
 
-    let version_map = version_list_manifest
-        .versions
-        .iter()
-        .map(|version| (version.id.to_owned(), version.to_owned()))
-        .collect::<HashMap<String, VersionInfo>>();
+        let client = Client::new();
+        let cache = Cache::new(cache_dir.to_path_buf(), &client);
 
-    let version = if cart_manifest.minecraft_version() == "latest" {
-        &version_list_manifest.latest.release
-    } else {
-        cart_manifest.minecraft_version()
-    };
+        let version_list_manifest = fetch_version_list_manifest(&cache).await?;
 
-    let version_info = &version_map[version];
-    let version_manifest = cache
-        .fetch_json::<VersionManifest>(&version_info.url, Some(&version_info.sha1))
-        .await?;
+        let version_map = version_list_manifest
+            .versions
+            .iter()
+            .map(|version| (version.id.to_owned(), version.to_owned()))
+            .collect::<HashMap<String, VersionInfo>>();
 
-    let asset_index = &version_manifest.asset_index;
+        let version = if cart_manifest.minecraft_version() == "latest" {
+            &version_list_manifest.latest.release
+        } else {
+            cart_manifest.minecraft_version()
+        };
 
-    let assets_path = fetch_assets(&asset_index, &cache).await?;
-    let java_path =
-        fetch_java_distribution(version_manifest.java_version.component, &cache).await?;
+        let version_info = &version_map[version];
+        let version_manifest = cache
+            .fetch_json::<VersionManifest>(&version_info.url, Some(&version_info.sha1))
+            .await?;
 
-    let natives_directory = tempfile::tempdir()?;
+        let asset_index = &version_manifest.asset_index;
 
-    let classpath = build_class_path(&version_manifest, &natives_directory, &cache).await?;
+        let assets_path = fetch_assets(&asset_index, &cache).await?;
+        let java_path =
+            fetch_java_distribution(version_manifest.java_version.component, &cache).await?;
 
-    Command::new(java_path.join("bin").join("java"))
-        .current_dir(manifest_directory)
-        .arg(format!(
-            "-Djava.library.path={}",
-            natives_directory.path().display()
-        ))
-        .arg("-Xmx4G")
-        .arg("-Xms1G")
-        .arg("-cp")
-        .arg(classpath)
-        .arg(version_manifest.main_class)
-        .arg("--username")
-        .arg("OfflinePlayer")
-        .arg("--version")
-        .arg(version)
-        .arg("--gameDir")
-        .arg("minecraft/")
-        .arg("--assetsDir")
-        .arg(assets_path)
-        .arg("--assetIndex")
-        .arg(&asset_index.id)
-        .arg("--uuid")
-        .arg("00000000-0000-0000-0000-000000000000")
-        .arg("--accessToken")
-        .arg("0")
-        .arg("--userType")
-        .arg("legacy")
-        .status()
-        .await?;
+        let natives_directory = tempfile::tempdir()?;
 
-    Ok(())
+        let classpath = build_class_path(&version_manifest, &natives_directory, &cache).await?;
+
+        Command::new(java_path.join("bin").join("java"))
+            .current_dir(manifest_directory)
+            .arg(format!(
+                "-Djava.library.path={}",
+                natives_directory.path().display()
+            ))
+            .arg("-Xmx4G")
+            .arg("-Xms1G")
+            .arg("-cp")
+            .arg(classpath)
+            .arg(version_manifest.main_class)
+            .arg("--username")
+            .arg("OfflinePlayer")
+            .arg("--version")
+            .arg(version)
+            .arg("--gameDir")
+            .arg("minecraft/")
+            .arg("--assetsDir")
+            .arg(assets_path)
+            .arg("--assetIndex")
+            .arg(&asset_index.id)
+            .arg("--uuid")
+            .arg("00000000-0000-0000-0000-000000000000")
+            .arg("--accessToken")
+            .arg("0")
+            .arg("--userType")
+            .arg("legacy")
+            .status()
+            .await?;
+
+        Ok(())
+    }
 }
