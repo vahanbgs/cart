@@ -21,10 +21,15 @@ use cart::{
 use clap::Parser;
 use directories_next::ProjectDirs;
 use reqwest::Client;
-use tokio::{fs, process::Command};
+use tempfile::TempDir;
+use tokio::{
+    fs::{self, File},
+    process::Command,
+};
 use url::Url;
 
 use cache::Cache;
+use zip::ZipArchive;
 
 async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
     fs::set_permissions(path, Permissions::from_mode(0o755)).await?;
@@ -155,6 +160,7 @@ async fn fetch_game_client_jar(
 
 async fn build_class_path(
     version_manifest: &VersionManifest,
+    natives_directory: &TempDir,
     cache: &Cache<'_>,
 ) -> anyhow::Result<String> {
     let game_client_jar_path = fetch_game_client_jar(&version_manifest.downloads, &cache).await?;
@@ -196,8 +202,11 @@ async fn build_class_path(
 
         if let Some(native) = &library_entry.downloads.classifiers {
             if let Some(native) = native.get(&NativeClassifier::current()) {
-                // Not handling older versions correctly for now
-                cache.fetch(&native.url, Some(&native.sha1)).await?;
+                let jar_path = cache.fetch(&native.url, Some(&native.sha1)).await?;
+                let jar_file = File::open(jar_path).await?;
+                let mut archive = ZipArchive::new(jar_file.into_std().await)?;
+
+                archive.extract(natives_directory)?;
             }
         }
     }
@@ -282,10 +291,16 @@ async fn main() -> anyhow::Result<()> {
     let java_path =
         fetch_java_distribution(version_manifest.java_version.component, &cache).await?;
 
-    let classpath = build_class_path(&version_manifest, &cache).await?;
+    let natives_directory = tempfile::tempdir()?;
+
+    let classpath = build_class_path(&version_manifest, &natives_directory, &cache).await?;
 
     Command::new(java_path.join("bin").join("java"))
         .current_dir(manifest_directory)
+        .arg(format!(
+            "-Djava.library.path={}",
+            natives_directory.path().display()
+        ))
         .arg("-Xmx4G")
         .arg("-Xms1G")
         .arg("-cp")
