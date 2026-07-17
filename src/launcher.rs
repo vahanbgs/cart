@@ -1,24 +1,22 @@
 mod cache;
+mod instance;
+
+pub use instance::Instance;
 
 use std::{
     collections::HashMap,
-    env::{self},
     fs::Permissions,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
-use crate::{
-    CartManifest, Cli,
-    piston::{
-        Action, AssetIndex, AssetManifest, FileSystemEntry, GameJarDownloadOptions,
-        JavaDistributionListManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent,
-        NativeClassifier, Os, VersionInfo, VersionListManifest, VersionManifest,
-    },
+use crate::piston::{
+    Action, AssetIndex, AssetManifest, FileSystemEntry, GameJarDownloadOptions,
+    JavaDistributionListManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent,
+    NativeClassifier, Os, VersionInfo, VersionListManifest, VersionManifest,
 };
 use anyhow::bail;
-use clap::Parser;
 use directories_next::ProjectDirs;
 use reqwest::Client;
 use tempfile::TempDir;
@@ -214,38 +212,6 @@ async fn build_class_path(
     Ok(classpath.join(":"))
 }
 
-async fn try_find_manifest_file() -> anyhow::Result<PathBuf> {
-    let mut current_directory = env::current_dir()?;
-
-    loop {
-        let manifest_path = current_directory.join("cart.toml");
-
-        if fs::try_exists(&manifest_path).await? {
-            return Ok(manifest_path);
-        }
-
-        if !current_directory.pop() {
-            break;
-        }
-    }
-
-    bail!("Could not find cart.toml manifest file");
-}
-
-async fn resolve_manifest_path(cli: &Cli) -> anyhow::Result<PathBuf> {
-    if let Some(manifest_path) = &cli.manifest {
-        return Ok(manifest_path.to_owned());
-    }
-
-    try_find_manifest_file().await
-}
-
-async fn load_manifest_file(path: &Path) -> anyhow::Result<CartManifest> {
-    let manifest = toml::from_str(&fs::read_to_string(path).await?)?;
-
-    Ok(manifest)
-}
-
 pub struct Launcher {}
 
 impl Launcher {
@@ -253,14 +219,7 @@ impl Launcher {
         Self {}
     }
 
-    pub async fn launch(&self) -> anyhow::Result<()> {
-        let cli = Cli::parse();
-
-        let manifest_path = resolve_manifest_path(&cli).await?;
-        let mut cart_manifest = load_manifest_file(&manifest_path).await?;
-        cart_manifest.override_with(&cli);
-        let manifest_directory = manifest_path.parent().unwrap();
-
+    pub async fn launch(&self, instance: &Instance) -> anyhow::Result<()> {
         let Some(project_dirs) = ProjectDirs::from("", "", "cart") else {
             bail!("Could not find valid home directory path")
         };
@@ -278,13 +237,13 @@ impl Launcher {
             .map(|version| (version.id.to_owned(), version.to_owned()))
             .collect::<HashMap<String, VersionInfo>>();
 
-        let version = if cart_manifest.minecraft_version() == "latest" {
+        let version = if instance.version() == "latest" {
             &version_list_manifest.latest.release
         } else {
-            cart_manifest.minecraft_version()
+            instance.version()
         };
 
-        let version_info = &version_map[version];
+        let version_info = &version_map.get(version).expect("unknown version");
         let version_manifest = cache
             .fetch_json::<VersionManifest>(&version_info.url, Some(&version_info.sha1))
             .await?;
@@ -299,8 +258,10 @@ impl Launcher {
 
         let classpath = build_class_path(&version_manifest, &natives_directory, &cache).await?;
 
+        fs::create_dir_all(instance.directory()).await?;
+
         Command::new(java_path.join("bin").join("java"))
-            .current_dir(manifest_directory)
+            .current_dir(instance.directory())
             .arg(format!(
                 "-Djava.library.path={}",
                 natives_directory.path().display()
@@ -315,7 +276,7 @@ impl Launcher {
             .arg("--version")
             .arg(version)
             .arg("--gameDir")
-            .arg("minecraft/")
+            .arg(instance.directory())
             .arg("--assetsDir")
             .arg(assets_path)
             .arg("--assetIndex")
