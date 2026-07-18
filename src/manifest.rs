@@ -20,12 +20,12 @@ impl Default for MinecraftVersion {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-pub struct CartManifest {
+pub struct Manifest {
     #[serde(default)]
     pub minecraft: MinecraftVersion,
 }
 
-impl CartManifest {
+impl Manifest {
     pub fn override_with(&mut self, cli: &Cli) {
         if let Some(minecraft_version) = &cli.minecraft_version {
             self.minecraft = MinecraftVersion(minecraft_version.to_owned());
@@ -62,13 +62,13 @@ impl CartManifest {
         Self::try_find_path().await
     }
 
-    async fn load_from_path(path: &Path) -> anyhow::Result<CartManifest> {
+    async fn load_from_path(path: &Path) -> anyhow::Result<Manifest> {
         let manifest = toml::from_str(&fs::read_to_string(path).await?)?;
 
         Ok(manifest)
     }
 
-    pub async fn load(cli: &Cli, path: &Path) -> anyhow::Result<CartManifest> {
+    pub async fn load(cli: &Cli, path: &Path) -> anyhow::Result<Manifest> {
         let mut manifest = Self::load_from_path(path).await?;
 
         manifest.override_with(cli);
