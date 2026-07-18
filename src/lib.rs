@@ -1,9 +1,11 @@
 mod cli;
+mod config;
 mod launcher;
 mod manifest;
 pub mod piston;
 
 pub use cli::Cli;
+pub use config::Config;
 pub use launcher::Instance;
 pub use launcher::Launcher;
 pub use manifest::Manifest;
