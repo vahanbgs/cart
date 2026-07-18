@@ -1,3 +1,7 @@
+mod asset;
+
+pub use asset::AssetCache;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;

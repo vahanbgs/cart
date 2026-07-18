@@ -11,11 +11,6 @@ use std::{
     str::FromStr,
 };
 
-use crate::piston::{
-    Action, AssetIndex, AssetManifest, FileSystemEntry, GameJarDownloadOptions,
-    JavaDistributionListManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent,
-    NativeClassifier, Os, VersionInfo, VersionListManifest, VersionManifest,
-};
 use anyhow::bail;
 use directories_next::ProjectDirs;
 use reqwest::Client;
@@ -25,9 +20,14 @@ use tokio::{
     process::Command,
 };
 use url::Url;
-
-use cache::Cache;
 use zip::ZipArchive;
+
+use crate::piston::{
+    Action, FileSystemEntry, GameJarDownloadOptions, JavaDistributionListManifest,
+    JavaDistributionManifest, JavaPlatform, JavaVersionComponent, NativeClassifier, Os,
+    VersionInfo, VersionListManifest, VersionManifest,
+};
+use cache::{AssetCache, Cache};
 
 async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
     fs::set_permissions(path, Permissions::from_mode(0o755)).await?;
@@ -99,50 +99,6 @@ async fn fetch_java_distribution(
     }
 
     Ok(java_distribution_path)
-}
-
-async fn fetch_assets(asset_index: &AssetIndex, cache: &Cache<'_>) -> anyhow::Result<PathBuf> {
-    let asset_manifest = cache
-        .fetch_json::<AssetManifest>(&asset_index.url, Some(&asset_index.sha1))
-        .await?;
-
-    let assets_path = cache.directory().join("assets");
-    let assets_indexes_path = assets_path.join("indexes");
-    let assets_objects_path = assets_path.join("objects");
-
-    fs::create_dir_all(&assets_indexes_path).await?;
-
-    let asset_manifest_path = cache
-        .fetch(&asset_index.url, Some(&asset_index.sha1))
-        .await?;
-
-    fs::copy(
-        &asset_manifest_path,
-        assets_indexes_path.join(asset_manifest_path.file_name().unwrap()),
-    )
-    .await?;
-
-    let asset_store_url = Url::parse("https://resources.download.minecraft.net/")?;
-
-    for (_, object) in asset_manifest.objects {
-        let digest = object.hash.to_hex();
-        let first_byte = hex::encode(&object.hash.as_bytes()[..1]);
-
-        cache
-            .fetch(
-                &asset_store_url
-                    .join(&format!("{}/", &first_byte))?
-                    .join(&digest)?,
-                Some(&object.hash),
-            )
-            .await?;
-    }
-
-    if !fs::try_exists(&assets_objects_path).await? {
-        fs::symlink("../resources.download.minecraft.net/", &assets_objects_path).await?;
-    }
-
-    Ok(assets_path)
 }
 
 async fn fetch_game_client_jar(
@@ -249,8 +205,10 @@ impl Launcher {
             .await?;
 
         let asset_index = &version_manifest.asset_index;
+        let asset_cache = AssetCache::new(&cache);
+        asset_cache.update(asset_index).await?;
+        let asset_directory = asset_cache.directory();
 
-        let assets_path = fetch_assets(&asset_index, &cache).await?;
         let java_path =
             fetch_java_distribution(version_manifest.java_version.component, &cache).await?;
 
@@ -278,7 +236,7 @@ impl Launcher {
             .arg("--gameDir")
             .arg(instance.directory())
             .arg("--assetsDir")
-            .arg(assets_path)
+            .arg(asset_directory)
             .arg("--assetIndex")
             .arg(&asset_index.id)
             .arg("--uuid")
