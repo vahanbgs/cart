@@ -1,4 +1,11 @@
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
+
+use anyhow::bail;
 use serde::Deserialize;
+use tokio::fs;
 
 use crate::Cli;
 
@@ -27,5 +34,45 @@ impl CartManifest {
 
     pub fn minecraft_version(&self) -> &str {
         &self.minecraft.0
+    }
+
+    async fn try_find_path() -> anyhow::Result<PathBuf> {
+        let mut current_directory = env::current_dir()?;
+
+        loop {
+            let manifest_path = current_directory.join("cart.toml");
+
+            if fs::try_exists(&manifest_path).await? {
+                return Ok(manifest_path);
+            }
+
+            if !current_directory.pop() {
+                break;
+            }
+        }
+
+        bail!("Could not find cart.toml manifest file");
+    }
+
+    pub async fn resolve_path(cli: &Cli) -> anyhow::Result<PathBuf> {
+        if let Some(manifest_path) = &cli.manifest {
+            return Ok(manifest_path.to_owned());
+        }
+
+        Self::try_find_path().await
+    }
+
+    async fn load_from_path(path: &Path) -> anyhow::Result<CartManifest> {
+        let manifest = toml::from_str(&fs::read_to_string(path).await?)?;
+
+        Ok(manifest)
+    }
+
+    pub async fn load(cli: &Cli, path: &Path) -> anyhow::Result<CartManifest> {
+        let mut manifest = Self::load_from_path(path).await?;
+
+        manifest.override_with(cli);
+
+        Ok(manifest)
     }
 }
