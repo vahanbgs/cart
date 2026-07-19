@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 pub struct Cli {
@@ -9,6 +9,14 @@ pub struct Cli {
 
     #[arg(long = "mv")]
     pub minecraft_version: Option<String>,
+
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    Run,
 }
 
 impl Cli {

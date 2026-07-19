@@ -1,19 +1,15 @@
 use std::path::{Path, PathBuf};
 
-use clap::Parser;
-
 use crate::{Cli, Manifest};
 
-pub struct Config {
-    cli: Cli,
+pub struct Config<'cli> {
+    cli: &'cli Cli,
     manifest: Manifest,
     manifest_directory: PathBuf,
 }
 
-impl Config {
-    pub async fn load() -> anyhow::Result<Self> {
-        let cli = Cli::parse();
-
+impl<'cli> Config<'cli> {
+    pub async fn load(cli: &'cli Cli) -> anyhow::Result<Self> {
         let (manifest_directory, manifest_path) = match cli.manifest_path() {
             Some(paths) => paths,
             None => Manifest::locate().await?,
@@ -34,6 +30,10 @@ impl Config {
             .as_deref()
             .or(self.manifest.minecraft.as_deref())
             .unwrap_or("latest")
+    }
+
+    pub fn cli(&self) -> &Cli {
+        &self.cli
     }
 
     pub fn manifest_directory(&self) -> &Path {
