@@ -1,5 +1,5 @@
+pub mod api;
 mod launcher;
-pub mod piston;
 
 pub use launcher::{Instance, Launcher};
 

@@ -22,7 +22,7 @@ use tokio::{
 use url::Url;
 use zip::ZipArchive;
 
-use crate::piston::{
+use crate::api::piston::{
     Action, FileSystemEntry, GameJarDownloadOptions, JavaDistributionListManifest,
     JavaDistributionManifest, JavaPlatform, JavaVersionComponent, NativeClassifier, Os,
     VersionInfo, VersionListManifest, VersionManifest,

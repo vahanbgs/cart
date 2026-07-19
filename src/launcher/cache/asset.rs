@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use url::Url;
 
-use crate::piston::{AssetIndex, AssetManifest};
+use crate::api::piston::{AssetIndex, AssetManifest};
 
 use super::Cache;
 
