@@ -28,12 +28,7 @@ impl<'cli> Config<'cli> {
         self.cli
             .minecraft_version
             .as_deref()
-            .or(self.manifest.minecraft.as_deref())
-            .unwrap_or("latest")
-    }
-
-    pub fn cli(&self) -> &Cli {
-        &self.cli
+            .unwrap_or(&self.manifest.minecraft)
     }
 
     pub fn manifest_directory(&self) -> &Path {
