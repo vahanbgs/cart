@@ -5,11 +5,11 @@ mod manifest;
 use clap::Parser;
 use tokio::fs;
 
-use cart::Instance;
+use cart::{Instance, Launcher, ModCache};
 
 use cli::{Cli, Commands};
 use config::Config;
-use manifest::Manifest;
+use manifest::{Manifest, ModDependency};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,11 +29,20 @@ async fn main() -> anyhow::Result<()> {
         Commands::Run => {
             let config = Config::load(&cli).await?;
 
+            let launcher = Launcher::new();
+            let cache = ModCache::new(launcher.cache());
+
+            for (_mod_name, mod_source) in &config.manifest().mods {
+                let _path = match mod_source {
+                    ModDependency::Url { url } => cache.fetch_mod(&url).await?,
+                };
+            }
+
             let instance = Instance::builder()
                 .version(config.minecraft_version())
                 .build(config.manifest_directory().join("minecraft/"));
 
-            instance.launch().await?;
+            launcher.launch(&instance).await?;
         }
     }
 

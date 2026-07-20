@@ -31,6 +31,10 @@ impl<'cli> Config<'cli> {
             .unwrap_or(&self.manifest.minecraft)
     }
 
+    pub fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+
     pub fn manifest_directory(&self) -> &Path {
         &self.manifest_directory
     }

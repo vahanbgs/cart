@@ -1,6 +1,8 @@
 mod asset;
+mod mod_cache;
 
 pub use asset::AssetCache;
+pub use mod_cache::ModCache;
 
 use std::path::{Path, PathBuf};
 
@@ -13,13 +15,13 @@ use url::{Origin, Url};
 
 use crate::Sha1Digest;
 
-pub struct Cache<'a> {
+pub struct Cache {
     path: PathBuf,
-    client: &'a Client,
+    client: Client,
 }
 
-impl<'a> Cache<'a> {
-    pub fn new(path: PathBuf, client: &'a Client) -> Self {
+impl Cache {
+    pub fn new(path: PathBuf, client: Client) -> Self {
         Self { path, client }
     }
 

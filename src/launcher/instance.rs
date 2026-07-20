@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use super::Launcher;
+
 pub struct Instance {
     directory: PathBuf,
     version: String,
@@ -25,7 +27,7 @@ impl Instance {
     }
 
     pub async fn launch(&self) -> anyhow::Result<()> {
-        super::Launcher::new().launch(self).await
+        Launcher::new().launch(self).await
     }
 }
 

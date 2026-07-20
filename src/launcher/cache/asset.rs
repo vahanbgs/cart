@@ -7,13 +7,13 @@ use crate::api::piston::{AssetIndex, AssetManifest};
 
 use super::Cache;
 
-pub struct AssetCache<'cache, 'client> {
-    cache: &'cache Cache<'client>,
+pub struct AssetCache<'cache> {
+    cache: &'cache Cache,
     directory: PathBuf,
 }
 
-impl<'cache, 'client> AssetCache<'cache, 'client> {
-    pub fn new(cache: &'cache Cache<'client>) -> Self {
+impl<'cache> AssetCache<'cache> {
+    pub fn new(cache: &'cache Cache) -> Self {
         let directory = cache.directory().join("assets");
 
         Self { cache, directory }

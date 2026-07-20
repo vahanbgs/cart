@@ -1,5 +1,7 @@
 mod mod_dependency;
 
+pub use mod_dependency::ModDependency;
+
 use std::{
     collections::HashMap,
     env,
@@ -9,8 +11,6 @@ use std::{
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-
-use mod_dependency::ModDependency;
 
 use crate::Cli;
 

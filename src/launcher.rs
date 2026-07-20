@@ -1,6 +1,7 @@
 mod cache;
 mod instance;
 
+pub use cache::ModCache;
 pub use instance::Instance;
 
 use std::{
@@ -9,7 +10,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::bail;
 use directories_next::ProjectDirs;
 use reqwest::Client;
 use tempfile::TempDir;
@@ -35,12 +35,12 @@ async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn fetch_version_manifest(cache: &Cache<'_>) -> anyhow::Result<VersionManifest> {
+async fn fetch_version_manifest(cache: &Cache) -> anyhow::Result<VersionManifest> {
     cache.fetch_json(VersionManifest::url(), None).await
 }
 
 async fn fetch_java_distribution_manifest(
-    cache: &Cache<'_>,
+    cache: &Cache,
 ) -> anyhow::Result<JavaDistributionManifest> {
     cache
         .fetch_json(JavaDistributionManifest::url(), None)
@@ -49,7 +49,7 @@ async fn fetch_java_distribution_manifest(
 
 async fn fetch_java_distribution(
     java_version_component: JavaVersionComponent,
-    cache: &Cache<'_>,
+    cache: &Cache,
 ) -> anyhow::Result<PathBuf> {
     let java_distribution_manifest = fetch_java_distribution_manifest(cache).await?;
 
@@ -99,7 +99,7 @@ async fn fetch_java_distribution(
 
 async fn fetch_game_client_jar(
     game_jar_download_options: &GameJarDownloadOptions,
-    cache: &Cache<'_>,
+    cache: &Cache,
 ) -> anyhow::Result<PathBuf> {
     let download_entry = &game_jar_download_options.client;
 
@@ -111,7 +111,7 @@ async fn fetch_game_client_jar(
 async fn build_class_path(
     version_manifest: &Version,
     natives_directory: &TempDir,
-    cache: &Cache<'_>,
+    cache: &Cache,
 ) -> anyhow::Result<String> {
     let game_client_jar_path = fetch_game_client_jar(&version_manifest.downloads, &cache).await?;
 
@@ -164,24 +164,27 @@ async fn build_class_path(
     Ok(classpath.join(":"))
 }
 
-pub struct Launcher {}
+pub struct Launcher {
+    cache: Cache,
+}
 
 impl Launcher {
     pub fn new() -> Self {
-        Self {}
+        let project_dirs =
+            ProjectDirs::from("", "", "cart").expect("Could not find valid home directory path");
+        let cache_dir = project_dirs.cache_dir();
+        let client = Client::new();
+        let cache = Cache::new(cache_dir.to_owned(), client);
+
+        Self { cache }
+    }
+
+    pub fn builder() -> LauncherBuilder {
+        Default::default()
     }
 
     pub async fn launch(&self, instance: &Instance) -> anyhow::Result<()> {
-        let Some(project_dirs) = ProjectDirs::from("", "", "cart") else {
-            bail!("Could not find valid home directory path")
-        };
-
-        let cache_dir = project_dirs.cache_dir();
-
-        let client = Client::new();
-        let cache = Cache::new(cache_dir.to_path_buf(), &client);
-
-        let version_manifest = fetch_version_manifest(&cache).await?;
+        let version_manifest = fetch_version_manifest(&self.cache).await?;
 
         let version_map = version_manifest.version_map();
 
@@ -192,20 +195,22 @@ impl Launcher {
         };
 
         let version_info = &version_map.get(version_id).expect("unknown version");
-        let version = cache
+        let version = self
+            .cache
             .fetch_json::<Version>(&version_info.url, Some(&version_info.sha1))
             .await?;
 
         let asset_index = &version.asset_index;
-        let asset_cache = AssetCache::new(&cache);
+        let asset_cache = AssetCache::new(&self.cache);
         asset_cache.update(asset_index).await?;
         let asset_directory = asset_cache.directory();
 
-        let java_path = fetch_java_distribution(version.java_version.component, &cache).await?;
+        let java_path =
+            fetch_java_distribution(version.java_version.component, &self.cache).await?;
 
         let natives_directory = tempfile::tempdir()?;
 
-        let classpath = build_class_path(&version, &natives_directory, &cache).await?;
+        let classpath = build_class_path(&version, &natives_directory, &self.cache).await?;
 
         fs::create_dir_all(instance.directory()).await?;
 
@@ -240,5 +245,36 @@ impl Launcher {
             .await?;
 
         Ok(())
+    }
+
+    pub fn cache(&self) -> &Cache {
+        &self.cache
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct LauncherBuilder {
+    cache_dir: Option<PathBuf>,
+}
+
+impl LauncherBuilder {
+    pub fn build(self) -> Launcher {
+        let cache_dir = self.cache_dir.unwrap_or_else(|| {
+            let project_dirs = ProjectDirs::from("", "", "cart")
+                .expect("Could not find valid home directory path");
+
+            project_dirs.cache_dir().to_owned()
+        });
+
+        let client = Client::new();
+        let cache = Cache::new(cache_dir, client);
+
+        Launcher { cache }
+    }
+
+    pub fn cache_dir(mut self, cache_dir: impl Into<PathBuf>) -> Self {
+        self.cache_dir = Some(cache_dir.into());
+
+        self
     }
 }
