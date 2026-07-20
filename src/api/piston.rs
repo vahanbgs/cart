@@ -1,6 +1,9 @@
+mod rule;
 mod version;
 mod version_manifest;
 
+pub use rule::{Action, Os, OsName, Rule};
+pub use version::{AssetIndex, GameJarDownloadOptions, Kind, Version};
 pub use version_manifest::VersionManifest;
 
 use std::{collections::HashMap, path::PathBuf, sync::LazyLock};
@@ -12,10 +15,15 @@ use url::Url;
 
 use crate::Sha1Digest;
 
-use version::Kind;
-
 static BASE_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://piston-meta.mojang.com/").unwrap());
+
+#[derive(Debug, Deserialize)]
+pub struct DownloadEntry {
+    pub sha1: Sha1Digest,
+    pub size: u32,
+    pub url: Url,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -85,30 +93,6 @@ pub enum JavaVersionComponent {
     #[default]
     JreLegacy,
     MinecraftJavaExe,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Arch {
-    X86,
-}
-
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum OsName {
-    Linux,
-    Osx,
-    Windows,
-}
-
-impl OsName {
-    pub fn matches_current_platform(self) -> bool {
-        match self {
-            OsName::Linux => cfg!(target_os = "linux"),
-            OsName::Osx => cfg!(target_os = "macos"),
-            OsName::Windows => cfg!(target_os = "windows"),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Deserialize, AsRefStr)]
@@ -206,16 +190,6 @@ pub struct AssetManifest {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AssetIndex {
-    pub id: String,
-    pub sha1: Sha1Digest,
-    pub size: u32,
-    pub total_size: u32,
-    pub url: Url,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct LibraryDownloadEntry {
     pub path: PathBuf,
     pub sha1: Sha1Digest,
@@ -227,37 +201,6 @@ pub struct LibraryDownloadEntry {
 pub struct LibraryDownloadOptions {
     pub artifact: Option<LibraryDownloadEntry>,
     pub classifiers: Option<HashMap<NativeClassifier, LibraryDownloadEntry>>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum Action {
-    Allow,
-    Disallow,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum Os {
-    Arch { arch: Arch },
-    Name { name: OsName },
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Features {
-    pub is_demo_user: Option<bool>,
-    pub is_quick_play_realms: Option<bool>,
-    pub is_quick_play_singleplayer: Option<bool>,
-    pub is_quick_play_multiplayer: Option<bool>,
-    pub has_custom_resolution: Option<bool>,
-    pub has_quick_plays_support: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Rule {
-    pub action: Action,
-    pub os: Option<Os>,
-    pub features: Option<Features>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -272,65 +215,6 @@ pub struct LibraryEntry {
     pub name: String,
     pub natives: Option<HashMap<OsName, NativeClassifier>>,
     pub rules: Option<Vec<Rule>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum ArgumentValue {
-    Multiple(Vec<String>),
-    Simple(String),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum Argument {
-    Complex {
-        rules: Vec<Rule>,
-        value: ArgumentValue,
-    },
-    Simple(String),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum Arguments {
-    Modern { game: Vec<Argument> },
-    Legacy(String),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Version {
-    #[serde(alias = "minecraftArguments")]
-    pub arguments: Arguments,
-    pub asset_index: AssetIndex,
-    pub assets: String,
-    pub downloads: GameJarDownloadOptions,
-    pub id: String,
-    #[serde(default)]
-    pub java_version: JavaVersion,
-    pub libraries: Vec<LibraryEntry>,
-    pub main_class: String,
-    pub minimum_launcher_version: u8,
-    #[serde(rename = "releaseTime")]
-    pub release_time: DateTime<Utc>,
-    pub time: DateTime<Utc>,
-    #[serde(rename = "type")]
-    pub kind: Kind,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DownloadEntry {
-    pub sha1: Sha1Digest,
-    pub size: u32,
-    pub url: Url,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct GameJarDownloadOptions {
-    pub client: DownloadEntry,
-    pub server: Option<DownloadEntry>,
-    pub windows_server: Option<DownloadEntry>,
 }
 
 #[derive(Debug, Deserialize)]
