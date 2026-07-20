@@ -11,6 +11,8 @@
       let
         pkgs = import inputs.nixpkgs {
           inherit system;
+
+          config.allowUnfree = true;
         };
       in
       {
@@ -37,6 +39,7 @@
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
             cargo
+            claude-code
             clippy
             nixd
             nixfmt
