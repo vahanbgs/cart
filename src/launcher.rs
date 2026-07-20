@@ -24,7 +24,7 @@ use zip::ZipArchive;
 use crate::api::{
     Endpoint,
     piston::{
-        Action, FileSystemEntry, GameJarDownloadOptions, JavaDistributionListManifest,
+        Action, FileSystemEntry, GameJarDownloadOptions, JavaDistribution,
         JavaDistributionManifest, JavaPlatform, JavaVersionComponent, NativeClassifier, Os,
         Version, VersionManifest,
     },
@@ -41,9 +41,9 @@ async fn fetch_version_manifest(cache: &Cache<'_>) -> anyhow::Result<VersionMani
     cache.fetch_json(VersionManifest::url(), None).await
 }
 
-async fn fetch_java_distribution_list_manifest(
+async fn fetch_java_distribution_manifest(
     cache: &Cache<'_>,
-) -> anyhow::Result<JavaDistributionListManifest> {
+) -> anyhow::Result<JavaDistributionManifest> {
     let url = Url::from_str(
         "https://piston-meta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json",
     )?;
@@ -55,13 +55,13 @@ async fn fetch_java_distribution(
     java_version_component: JavaVersionComponent,
     cache: &Cache<'_>,
 ) -> anyhow::Result<PathBuf> {
-    let java_distribution_list_manifest = fetch_java_distribution_list_manifest(cache).await?;
+    let java_distribution_manifest = fetch_java_distribution_manifest(cache).await?;
 
     let java_distribution_info =
-        &java_distribution_list_manifest[&JavaPlatform::CURRENT][&java_version_component][0];
+        &java_distribution_manifest.0[&JavaPlatform::CURRENT][&java_version_component][0];
 
-    let java_distribution_manifest = cache
-        .fetch_json::<JavaDistributionManifest>(
+    let java_distribution = cache
+        .fetch_json::<JavaDistribution>(
             &java_distribution_info.manifest.url,
             Some(&java_distribution_info.manifest.sha1),
         )
@@ -72,7 +72,7 @@ async fn fetch_java_distribution(
         .join("java")
         .join(java_version_component.as_ref());
 
-    for (path, fs_entry) in java_distribution_manifest.files {
+    for (path, fs_entry) in java_distribution.files {
         match fs_entry {
             FileSystemEntry::File {
                 downloads,
