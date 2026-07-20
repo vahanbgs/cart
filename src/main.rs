@@ -5,7 +5,7 @@ mod manifest;
 use clap::Parser;
 use tokio::fs;
 
-use cart::{Instance, Launcher, ModCache};
+use cart::{Instance, Launcher};
 
 use cli::{Cli, Commands};
 use config::Config;
@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
             let config = Config::load(&cli).await?;
 
             let launcher = Launcher::new();
-            let cache = ModCache::new(launcher.cache());
+            let cache = launcher.mod_cache();
 
             for (_mod_name, mod_source) in &config.manifest().mods {
                 let _path = match mod_source {

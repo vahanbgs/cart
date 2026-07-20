@@ -1,7 +1,6 @@
 mod cache;
 mod instance;
 
-pub use cache::ModCache;
 pub use instance::Instance;
 
 use std::{
@@ -27,7 +26,7 @@ use crate::api::{
         Version, VersionManifest,
     },
 };
-use cache::{AssetCache, Cache};
+use cache::{AssetCache, Cache, ModCache};
 
 async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
     fs::set_permissions(path, Permissions::from_mode(0o755)).await?;
@@ -245,6 +244,10 @@ impl Launcher {
             .await?;
 
         Ok(())
+    }
+
+    pub fn mod_cache(&self) -> ModCache<'_> {
+        ModCache::new(&self.cache)
     }
 
     pub fn cache(&self) -> &Cache {
