@@ -8,7 +8,9 @@ pub use java::{
     JavaVersionComponent,
 };
 pub use rule::{Action, Os, OsName, Rule};
-pub use version::{AssetIndex, GameJarDownloadOptions, Kind, Version};
+pub use version::{
+    Argument, ArgumentValue, Arguments, AssetIndex, GameJarDownloadOptions, Kind, Version,
+};
 pub use version_manifest::VersionManifest;
 
 use std::{collections::HashMap, path::PathBuf, sync::LazyLock};

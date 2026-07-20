@@ -4,6 +4,7 @@ mod instance;
 pub use instance::Instance;
 
 use std::{
+    collections::HashMap,
     fs::Permissions,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -21,9 +22,9 @@ use zip::ZipArchive;
 use crate::api::{
     Endpoint,
     piston::{
-        Action, FileSystemEntry, GameJarDownloadOptions, JavaDistribution,
-        JavaDistributionManifest, JavaPlatform, JavaVersionComponent, NativeClassifier, Os,
-        Version, VersionManifest,
+        Action, Argument, ArgumentValue, Arguments, FileSystemEntry, GameJarDownloadOptions,
+        JavaDistribution, JavaDistributionManifest, JavaPlatform, JavaVersionComponent,
+        NativeClassifier, Os, Rule, Version, VersionManifest,
     },
 };
 use cache::{AssetCache, Cache, ModCache};
@@ -163,6 +164,62 @@ async fn build_class_path(
     Ok(classpath.join(":"))
 }
 
+fn substitute(argument_string: &str, variables: &HashMap<&str, String>) -> String {
+    let mut result = argument_string.to_owned();
+
+    for (key, value) in variables {
+        result = result.replace(&format!("${{{key}}}"), value);
+    }
+
+    result
+}
+
+fn evaluate_rules(rules: &[Rule]) -> bool {
+    let mut allow = rules.is_empty();
+
+    for rule in rules {
+        let mut applies = true;
+
+        if let Some(os) = &rule.os {
+            applies &= match os {
+                Os::Arch { .. } => true,
+                Os::Name { name } => name.matches_current_platform(),
+            };
+        }
+
+        applies &= rule.features.is_none();
+
+        if applies {
+            allow = rule.action == Action::Allow;
+        }
+    }
+
+    allow
+}
+
+fn resolve_args(arguments: &[Argument], variables: &HashMap<&str, String>) -> Vec<String> {
+    let mut processed_arguments = Vec::new();
+
+    for argument in arguments {
+        match argument {
+            Argument::Simple(simple_argument) => {
+                processed_arguments.push(substitute(simple_argument, variables))
+            }
+            Argument::Complex { rules, value } if evaluate_rules(rules) => match value {
+                ArgumentValue::Simple(simple_argument) => {
+                    processed_arguments.push(substitute(simple_argument, variables))
+                }
+                ArgumentValue::Multiple(arguments) => {
+                    processed_arguments.extend(arguments.iter().map(|s| substitute(s, variables)))
+                }
+            },
+            Argument::Complex { .. } => {}
+        }
+    }
+
+    processed_arguments
+}
+
 pub struct Launcher {
     cache: Cache,
 }
@@ -213,35 +270,62 @@ impl Launcher {
 
         fs::create_dir_all(instance.directory()).await?;
 
-        Command::new(java_path.join("bin").join("java"))
-            .current_dir(instance.directory())
-            .arg(format!(
-                "-Djava.library.path={}",
-                natives_directory.path().display()
-            ))
-            .arg("-Xmx4G")
-            .arg("-Xms1G")
-            .arg("-cp")
-            .arg(classpath)
-            .arg(version.main_class)
-            .arg("--username")
-            .arg("OfflinePlayer")
-            .arg("--version")
-            .arg(version.id)
-            .arg("--gameDir")
-            .arg(instance.directory())
-            .arg("--assetsDir")
-            .arg(asset_directory)
-            .arg("--assetIndex")
-            .arg(&asset_index.id)
-            .arg("--uuid")
-            .arg("00000000-0000-0000-0000-000000000000")
-            .arg("--accessToken")
-            .arg("0")
-            .arg("--userType")
-            .arg("legacy")
-            .status()
-            .await?;
+        let vars: HashMap<&str, String> = [
+            ("auth_player_name", "OfflinePlayer".to_owned()),
+            ("version_name", version.id.clone()),
+            (
+                "game_directory",
+                instance.directory().to_string_lossy().into_owned(),
+            ),
+            (
+                "assets_root",
+                asset_directory.to_string_lossy().into_owned(),
+            ),
+            ("assets_index_name", asset_index.id.clone()),
+            (
+                "auth_uuid",
+                "00000000-0000-0000-0000-000000000000".to_owned(),
+            ),
+            ("auth_access_token", "0".to_owned()),
+            ("user_type", "legacy".to_owned()),
+            ("version_type", version.kind.as_ref().to_owned()),
+            (
+                "natives_directory",
+                natives_directory.path().to_string_lossy().into_owned(),
+            ),
+            ("launcher_name", "cart".to_owned()),
+            ("launcher_version", env!("CARGO_PKG_VERSION").to_owned()),
+            ("classpath", classpath),
+        ]
+        .into_iter()
+        .collect();
+
+        let mut command = Command::new(java_path.join("bin").join("java"));
+        command.current_dir(instance.directory());
+        command.args(["-Xmx4G", "-Xms1G"]);
+
+        match &version.arguments {
+            Arguments::Modern { jvm, game } => {
+                command.args(resolve_args(jvm, &vars));
+                command.arg(&version.main_class);
+                command.args(resolve_args(game, &vars));
+            }
+            Arguments::Legacy(minecraft_arguments) => {
+                command.args([
+                    substitute("-Djava.library.path=${natives_directory}", &vars),
+                    "-cp".to_owned(),
+                    substitute("${classpath}", &vars),
+                ]);
+                command.arg(&version.main_class);
+                command.args(
+                    minecraft_arguments
+                        .split_ascii_whitespace()
+                        .map(|token| substitute(token, &vars)),
+                );
+            }
+        }
+
+        command.status().await?;
 
         Ok(())
     }

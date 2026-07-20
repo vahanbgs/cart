@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use strum::AsRefStr;
 use url::Url;
 
 use crate::Sha1Digest;
@@ -30,7 +31,11 @@ pub struct Version {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Arguments {
-    Modern { game: Vec<Argument> },
+    Modern {
+        game: Vec<Argument>,
+        #[serde(default)]
+        jvm: Vec<Argument>,
+    },
     Legacy(String),
 }
 
@@ -68,8 +73,9 @@ pub struct GameJarDownloadOptions {
     pub windows_server: Option<DownloadEntry>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, AsRefStr)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum Kind {
     OldAlpha,
     OldBeta,
