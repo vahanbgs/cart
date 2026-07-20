@@ -185,12 +185,12 @@ impl Launcher {
         let client = Client::new();
         let cache = Cache::new(cache_dir.to_path_buf(), &client);
 
-        let version_list_manifest = fetch_version_manifest(&cache).await?;
+        let version_manifest = fetch_version_manifest(&cache).await?;
 
-        let version_map = version_list_manifest.version_map();
+        let version_map = version_manifest.version_map();
 
         let version_id = if instance.version() == "latest" {
-            version_list_manifest.latest_release()
+            version_manifest.latest_release()
         } else {
             instance.version()
         };

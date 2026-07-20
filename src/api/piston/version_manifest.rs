@@ -15,7 +15,7 @@ use crate::{
 #[derive(Debug, Deserialize)]
 pub struct VersionManifest {
     latest: Latest,
-    versions: Vec<Version>,
+    versions: Vec<VersionInfo>,
 }
 
 impl VersionManifest {
@@ -27,11 +27,11 @@ impl VersionManifest {
         &self.latest.snapshot
     }
 
-    pub fn versions(&self) -> &[Version] {
+    pub fn versions(&self) -> &[VersionInfo] {
         &self.versions
     }
 
-    pub fn version_map(&self) -> HashMap<&str, &Version> {
+    pub fn version_map(&self) -> HashMap<&str, &VersionInfo> {
         self.versions()
             .iter()
             .map(|version| (&version.id[..], version))
@@ -55,7 +55,7 @@ struct Latest {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct Version {
+pub struct VersionInfo {
     pub id: String,
     #[serde(rename = "type")]
     pub kind: Kind,
