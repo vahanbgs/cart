@@ -4,7 +4,6 @@ mod instance;
 pub use instance::Instance;
 
 use std::{
-    collections::HashMap,
     fs::Permissions,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -22,10 +21,13 @@ use tokio::{
 use url::Url;
 use zip::ZipArchive;
 
-use crate::api::piston::{
-    Action, FileSystemEntry, GameJarDownloadOptions, JavaDistributionListManifest,
-    JavaDistributionManifest, JavaPlatform, JavaVersionComponent, NativeClassifier, Os,
-    VersionInfo, VersionListManifest, VersionManifest,
+use crate::api::{
+    Endpoint,
+    piston::{
+        Action, FileSystemEntry, GameJarDownloadOptions, JavaDistributionListManifest,
+        JavaDistributionManifest, JavaPlatform, JavaVersionComponent, NativeClassifier, Os,
+        Version, VersionManifest,
+    },
 };
 use cache::{AssetCache, Cache};
 
@@ -35,10 +37,8 @@ async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn fetch_version_list_manifest(cache: &Cache<'_>) -> anyhow::Result<VersionListManifest> {
-    let url = Url::from_str("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")?;
-
-    cache.fetch_json(&url, None).await
+async fn fetch_version_manifest(cache: &Cache<'_>) -> anyhow::Result<VersionManifest> {
+    cache.fetch_json(VersionManifest::url(), None).await
 }
 
 async fn fetch_java_distribution_list_manifest(
@@ -113,7 +113,7 @@ async fn fetch_game_client_jar(
 }
 
 async fn build_class_path(
-    version_manifest: &VersionManifest,
+    version_manifest: &Version,
     natives_directory: &TempDir,
     cache: &Cache<'_>,
 ) -> anyhow::Result<String> {
@@ -185,36 +185,31 @@ impl Launcher {
         let client = Client::new();
         let cache = Cache::new(cache_dir.to_path_buf(), &client);
 
-        let version_list_manifest = fetch_version_list_manifest(&cache).await?;
+        let version_list_manifest = fetch_version_manifest(&cache).await?;
 
-        let version_map = version_list_manifest
-            .versions
-            .iter()
-            .map(|version| (version.id.to_owned(), version.to_owned()))
-            .collect::<HashMap<String, VersionInfo>>();
+        let version_map = version_list_manifest.version_map();
 
-        let version = if instance.version() == "latest" {
-            &version_list_manifest.latest.release
+        let version_id = if instance.version() == "latest" {
+            version_list_manifest.latest_release()
         } else {
             instance.version()
         };
 
-        let version_info = &version_map.get(version).expect("unknown version");
-        let version_manifest = cache
-            .fetch_json::<VersionManifest>(&version_info.url, Some(&version_info.sha1))
+        let version_info = &version_map.get(version_id).expect("unknown version");
+        let version = cache
+            .fetch_json::<Version>(&version_info.url, Some(&version_info.sha1))
             .await?;
 
-        let asset_index = &version_manifest.asset_index;
+        let asset_index = &version.asset_index;
         let asset_cache = AssetCache::new(&cache);
         asset_cache.update(asset_index).await?;
         let asset_directory = asset_cache.directory();
 
-        let java_path =
-            fetch_java_distribution(version_manifest.java_version.component, &cache).await?;
+        let java_path = fetch_java_distribution(version.java_version.component, &cache).await?;
 
         let natives_directory = tempfile::tempdir()?;
 
-        let classpath = build_class_path(&version_manifest, &natives_directory, &cache).await?;
+        let classpath = build_class_path(&version, &natives_directory, &cache).await?;
 
         fs::create_dir_all(instance.directory()).await?;
 
@@ -228,11 +223,11 @@ impl Launcher {
             .arg("-Xms1G")
             .arg("-cp")
             .arg(classpath)
-            .arg(version_manifest.main_class)
+            .arg(version.main_class)
             .arg("--username")
             .arg("OfflinePlayer")
             .arg("--version")
-            .arg(version)
+            .arg(version.id)
             .arg("--gameDir")
             .arg(instance.directory())
             .arg("--assetsDir")

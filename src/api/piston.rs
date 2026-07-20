@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::PathBuf};
+mod version;
+mod version_manifest;
+
+pub use version_manifest::VersionManifest;
+
+use std::{collections::HashMap, path::PathBuf, sync::LazyLock};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -7,20 +12,10 @@ use url::Url;
 
 use crate::Sha1Digest;
 
-#[derive(Debug, Deserialize)]
-pub struct LatestVersion {
-    pub release: String,
-    pub snapshot: String,
-}
+use version::Kind;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VersionType {
-    OldAlpha,
-    OldBeta,
-    Release,
-    Snapshot,
-}
+static BASE_URL: LazyLock<Url> =
+    LazyLock::new(|| Url::parse("https://piston-meta.mojang.com/").unwrap());
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -305,7 +300,7 @@ pub enum Arguments {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VersionManifest {
+pub struct Version {
     #[serde(alias = "minecraftArguments")]
     pub arguments: Arguments,
     pub asset_index: AssetIndex,
@@ -321,25 +316,7 @@ pub struct VersionManifest {
     pub release_time: DateTime<Utc>,
     pub time: DateTime<Utc>,
     #[serde(rename = "type")]
-    pub version_type: VersionType,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct VersionInfo {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub version_type: VersionType,
-    pub url: Url,
-    pub time: DateTime<Utc>,
-    #[serde(rename = "releaseTime")]
-    pub release_time: DateTime<Utc>,
-    pub sha1: Sha1Digest,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct VersionListManifest {
-    pub latest: LatestVersion,
-    pub versions: Vec<VersionInfo>,
+    pub kind: Kind,
 }
 
 #[derive(Debug, Deserialize)]
