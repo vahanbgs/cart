@@ -11,9 +11,12 @@ pub struct Build;
 
 impl Build {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
-        let config = Config::load(&cli).await?;
-
+        let config = Config::load(cli).await?;
         let launcher = Launcher::new();
+        self.run_with(&config, &launcher).await
+    }
+
+    pub async fn run_with(&self, config: &Config<'_>, launcher: &Launcher) -> anyhow::Result<()> {
         let cache = launcher.mod_cache();
 
         let game_directory = config.manifest_directory().join("minecraft/");
@@ -22,7 +25,7 @@ impl Build {
 
         for (mod_name, mod_source) in &config.manifest().mods {
             let source_path = match mod_source {
-                ModDependency::Url { url } => cache.fetch_mod(&url).await?,
+                ModDependency::Url { url } => cache.fetch_mod(url).await?,
             };
 
             let target_path = mods_directory.join(format!("{mod_name}.jar"));
