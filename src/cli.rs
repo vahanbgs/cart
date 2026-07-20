@@ -1,9 +1,14 @@
+mod build;
+mod init;
+mod run;
+
+pub use build::Build;
+pub use init::Init;
+pub use run::Run;
+
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
-use tokio::fs;
-
-use crate::manifest::Manifest;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 pub struct Cli {
@@ -31,23 +36,6 @@ impl Cli {
 #[derive(Subcommand)]
 pub enum Subcommands {
     Init(Init),
-    Run,
-}
-
-#[derive(Args)]
-pub struct Init {
-    pub path: PathBuf,
-}
-
-impl Init {
-    pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
-        fs::create_dir_all(&self.path).await?;
-        fs::write(
-            self.path.join("cart.toml"),
-            toml::to_string_pretty(&Manifest::new(&cli))?,
-        )
-        .await?;
-
-        Ok(())
-    }
+    Build(Build),
+    Run(Run),
 }
