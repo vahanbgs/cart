@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
+use tokio::fs;
+
+use crate::manifest::Manifest;
 
 #[derive(Parser)]
 pub struct Cli {
@@ -11,13 +14,7 @@ pub struct Cli {
     pub minecraft_version: Option<String>,
 
     #[command(subcommand)]
-    pub command: Commands,
-}
-
-#[derive(Subcommand)]
-pub enum Commands {
-    Init { path: PathBuf },
-    Run,
+    pub command: Subcommands,
 }
 
 impl Cli {
@@ -28,5 +25,29 @@ impl Cli {
         } else {
             None
         }
+    }
+}
+
+#[derive(Subcommand)]
+pub enum Subcommands {
+    Init(Init),
+    Run,
+}
+
+#[derive(Args)]
+pub struct Init {
+    pub path: PathBuf,
+}
+
+impl Init {
+    pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
+        fs::create_dir_all(&self.path).await?;
+        fs::write(
+            self.path.join("cart.toml"),
+            toml::to_string_pretty(&Manifest::new(&cli))?,
+        )
+        .await?;
+
+        Ok(())
     }
 }

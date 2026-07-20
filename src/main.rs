@@ -3,11 +3,10 @@ mod config;
 mod manifest;
 
 use clap::Parser;
-use tokio::fs;
 
 use cart::{Instance, Launcher};
 
-use cli::{Cli, Commands};
+use cli::{Cli, Subcommands};
 use config::Config;
 use manifest::{Manifest, ModDependency};
 
@@ -18,15 +17,10 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Init { path } => {
-            fs::create_dir_all(path).await?;
-            fs::write(
-                path.join("cart.toml"),
-                toml::to_string_pretty(&Manifest::new(&cli))?,
-            )
-            .await?;
+        Subcommands::Init(init) => {
+            init.run(&cli).await?;
         }
-        Commands::Run => {
+        Subcommands::Run => {
             let config = Config::load(&cli).await?;
 
             let launcher = Launcher::new();
