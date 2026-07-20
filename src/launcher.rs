@@ -7,7 +7,6 @@ use std::{
     fs::Permissions,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    str::FromStr,
 };
 
 use anyhow::bail;
@@ -18,7 +17,6 @@ use tokio::{
     fs::{self, File},
     process::Command,
 };
-use url::Url;
 use zip::ZipArchive;
 
 use crate::api::{
@@ -44,11 +42,9 @@ async fn fetch_version_manifest(cache: &Cache<'_>) -> anyhow::Result<VersionMani
 async fn fetch_java_distribution_manifest(
     cache: &Cache<'_>,
 ) -> anyhow::Result<JavaDistributionManifest> {
-    let url = Url::from_str(
-        "https://piston-meta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json",
-    )?;
-
-    cache.fetch_json(&url, None).await
+    cache
+        .fetch_json(JavaDistributionManifest::url(), None)
+        .await
 }
 
 async fn fetch_java_distribution(

@@ -1,18 +1,30 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::LazyLock};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use strum::AsRefStr;
 use url::Url;
 
-use crate::Sha1Digest;
+use crate::{Sha1Digest, api::Endpoint};
 
-use super::DownloadEntry;
+use super::{BASE_URL, DownloadEntry};
 
 #[derive(Debug, Deserialize)]
 pub struct JavaDistributionManifest(
     pub HashMap<JavaPlatform, HashMap<JavaVersionComponent, Vec<JavaDistributionInfo>>>,
 );
+
+impl Endpoint for JavaDistributionManifest {
+    fn url() -> &'static Url {
+        static URL: LazyLock<Url> = LazyLock::new(|| {
+            BASE_URL
+                .join("v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json")
+                .unwrap()
+        });
+
+        &URL
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
