@@ -78,3 +78,9 @@ async fn launches_1_12_2_vanilla() {
 async fn launches_1_20_1_vanilla() {
     assert_launches_cleanly("1.20.1", Duration::from_secs(15)).await;
 }
+
+#[tokio::test]
+#[ignore = "spawns Minecraft — needs a display (see file header)"]
+async fn launches_1_16_5_vanilla() {
+    assert_launches_cleanly("1.16.5", Duration::from_secs(15)).await;
+}
