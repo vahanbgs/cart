@@ -6,7 +6,8 @@ mod java;
 
 pub use cache::ModCache;
 pub use instance::Instance;
-use tokio::fs;
+use tempfile::TempDir;
+use tokio::{fs, process::Command};
 
 use std::{collections::HashMap, path::PathBuf};
 
@@ -40,7 +41,15 @@ impl Launcher {
         Default::default()
     }
 
-    pub async fn launch(&self, instance: &Instance) -> anyhow::Result<()> {
+    /// Assemble the full Java command that would launch `instance`,
+    /// including asset/Java/mod resolution and Forge install where
+    /// requested, plus the temporary natives directory it references.
+    /// Split out from `launch` so tests can spawn on their own timeline
+    /// — the `TempDir` must outlive the child process.
+    pub async fn build_command(
+        &self,
+        instance: &Instance,
+    ) -> anyhow::Result<(Command, TempDir)> {
         let version_manifest = self
             .cache
             .fetch_json::<VersionManifest>(VersionManifest::url(), None)
@@ -224,6 +233,16 @@ impl Launcher {
             Some(fv) => tracing::info!("launching minecraft {} with forge {fv}", version.id),
             None => tracing::info!("launching minecraft {}", version.id),
         }
+
+        Ok((command, natives_directory))
+    }
+
+    /// Assemble the launch command and wait for Minecraft to exit. A
+    /// non-zero exit is logged but not surfaced — Minecraft prints
+    /// crashes to `logs/latest.log`, and callers of `run` shouldn't get
+    /// an error just because the user closed the game.
+    pub async fn launch(&self, instance: &Instance) -> anyhow::Result<()> {
+        let (mut command, _natives_directory) = self.build_command(instance).await?;
 
         let status = command.status().await?;
         if !status.success() {
