@@ -25,7 +25,14 @@ pub struct Manifest {
 
 impl Manifest {
     pub async fn locate() -> anyhow::Result<(PathBuf, PathBuf)> {
-        let mut current_directory = env::current_dir()?;
+        Self::locate_from(&env::current_dir()?).await
+    }
+
+    /// Walk up from `start` looking for `cart.toml`. Split out from
+    /// `locate()` so tests can drive it against a tempdir without racing
+    /// the process-wide cwd.
+    pub async fn locate_from(start: &Path) -> anyhow::Result<(PathBuf, PathBuf)> {
+        let mut current_directory = start.to_owned();
 
         loop {
             let manifest_path = current_directory.join("cart.toml");
@@ -47,4 +54,38 @@ impl Manifest {
 
         Ok(manifest)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn locate_from_finds_manifest_in_start_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("cart.toml");
+        fs::write(&manifest_path, "minecraft = \"1.20.1\"\n[mods]\n")
+            .await
+            .unwrap();
+
+        let (project, path) = Manifest::locate_from(dir.path()).await.unwrap();
+        assert_eq!(project, dir.path());
+        assert_eq!(path, manifest_path);
+    }
+
+    #[tokio::test]
+    async fn locate_from_walks_up_to_ancestor() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("cart.toml");
+        fs::write(&manifest_path, "minecraft = \"1.20.1\"\n[mods]\n")
+            .await
+            .unwrap();
+        let nested = dir.path().join("a/b/c");
+        fs::create_dir_all(&nested).await.unwrap();
+
+        let (project, path) = Manifest::locate_from(&nested).await.unwrap();
+        assert_eq!(project, dir.path());
+        assert_eq!(path, manifest_path);
+    }
+
 }

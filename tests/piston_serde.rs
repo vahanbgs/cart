@@ -8,7 +8,10 @@
 
 use std::path::Path;
 
-use cart::api::piston::{Arguments, JavaVersionComponent, Kind, Version, VersionManifest};
+use cart::api::piston::{
+    Arguments, AssetManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent, Kind,
+    Version, VersionManifest,
+};
 
 fn fixture(relative: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -127,5 +130,66 @@ fn every_version_advertises_a_client_download() {
         let v = load_version(id);
         assert_eq!(v.downloads.client.sha1.to_hex().len(), 40, "{id}");
         assert!(v.downloads.client.size > 0, "{id}: zero-byte client");
+    }
+}
+
+/// Modern asset indexes have no `map_to_resources` field; the
+/// `#[serde(default)]` must fill it in as false so the launcher takes
+/// the modern code path instead of copying assets into
+/// `.minecraft/resources/`.
+#[test]
+fn modern_asset_index_defaults_map_to_resources_false() {
+    let raw = fixture("asset_indexes/5.json");
+    let index: AssetManifest = serde_json::from_str(&raw).unwrap();
+    assert!(!index.map_to_resources);
+    assert!(!index.objects.is_empty());
+    // Every entry must have a 40-char SHA-1 — that's what the cache path
+    // is built from.
+    for (name, obj) in &index.objects {
+        assert_eq!(obj.hash.to_hex().len(), 40, "{name:?}");
+        assert!(obj.size > 0, "{name:?}: zero-byte object");
+    }
+}
+
+/// Pre-1.6 asset indexes set `map_to_resources = true`, telling the
+/// launcher to symlink/copy assets into the game dir under
+/// `resources/<path>` instead of the modern virtual layout.
+#[test]
+fn legacy_asset_index_carries_map_to_resources_true() {
+    let raw = fixture("asset_indexes/pre-1.6.json");
+    let index: AssetManifest = serde_json::from_str(&raw).unwrap();
+    assert!(index.map_to_resources);
+    assert!(!index.objects.is_empty());
+}
+
+/// The full Java distribution manifest is `platform → component → [info]`.
+/// The `Launcher` looks up `JavaPlatform::CURRENT`, then follows the
+/// component the version JSON asks for; the fixture must contain every
+/// component enum variant we ship, on the current platform.
+#[test]
+fn java_distribution_manifest_covers_current_platform() {
+    let raw = fixture("java_distribution.json");
+    let manifest: JavaDistributionManifest = serde_json::from_str(&raw).unwrap();
+    let per_platform = manifest
+        .0
+        .get(&JavaPlatform::CURRENT)
+        .expect("current platform missing from java distribution manifest");
+    // Every variant of JavaVersionComponent needs a corresponding entry
+    // in the payload — if Mojang renames one, this breaks loudly.
+    for component in [
+        JavaVersionComponent::JavaRuntimeAlpha,
+        JavaVersionComponent::JavaRuntimeBeta,
+        JavaVersionComponent::JavaRuntimeDelta,
+        JavaVersionComponent::JavaRuntimeEpsilon,
+        JavaVersionComponent::JavaRuntimeGamma,
+        JavaVersionComponent::JavaRuntimeGammaSnapshot,
+        JavaVersionComponent::JreLegacy,
+        JavaVersionComponent::MinecraftJavaExe,
+    ] {
+        assert!(
+            per_platform.contains_key(&component),
+            "{component:?} missing on {:?}",
+            JavaPlatform::CURRENT,
+        );
     }
 }
