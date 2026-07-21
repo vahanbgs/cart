@@ -4,6 +4,7 @@ pub mod forge;
 mod instance;
 mod java;
 
+pub use cache::ModCache;
 pub use instance::Instance;
 use tokio::fs;
 
@@ -18,7 +19,7 @@ use crate::api::{
     forge::ForgePromotions,
     piston::{Arguments, Version, VersionManifest},
 };
-use cache::{AssetCache, Cache, ModCache};
+use cache::{AssetCache, Cache};
 
 pub struct Launcher {
     cache: Cache,
