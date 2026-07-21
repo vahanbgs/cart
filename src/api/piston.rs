@@ -15,7 +15,7 @@ pub use version_manifest::VersionManifest;
 
 use std::{collections::HashMap, path::PathBuf, sync::LazyLock};
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use strum::AsRefStr;
 use url::Url;
 
@@ -109,30 +109,46 @@ pub struct AssetManifest {
     pub objects: HashMap<PathBuf, AssetObject>,
 }
 
-#[derive(Debug, Deserialize)]
+fn deserialize_url_or_none<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Url>, D::Error> {
+    let s = String::deserialize(d)?;
+    if s.is_empty() {
+        return Ok(None);
+    }
+    Url::parse(&s).map(Some).map_err(serde::de::Error::custom)
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct LibraryDownloadEntry {
     pub path: PathBuf,
     pub sha1: Sha1Digest,
     pub size: u32,
-    pub url: Url,
+    #[serde(deserialize_with = "deserialize_url_or_none")]
+    pub url: Option<Url>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct LibraryDownloadOptions {
     pub artifact: Option<LibraryDownloadEntry>,
     pub classifiers: Option<HashMap<NativeClassifier, LibraryDownloadEntry>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Extract {
     pub exclude: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct LibraryEntry {
+    #[serde(default)]
     pub downloads: LibraryDownloadOptions,
     pub extract: Option<Extract>,
     pub name: String,
     pub natives: Option<HashMap<OsName, NativeClassifier>>,
     pub rules: Option<Vec<Rule>>,
+    /// Legacy library base URL (pre-1.13 Forge). Combined with the Maven
+    /// coordinate of `name` to form the full download URL.
+    #[serde(default)]
+    pub url: Option<Url>,
+    /// Legacy Forge field; `Some(false)` means server-only, skip on client.
+    pub clientreq: Option<bool>,
 }

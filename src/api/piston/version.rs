@@ -39,7 +39,7 @@ pub enum Arguments {
     Legacy(String),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Argument {
     Complex {
@@ -49,7 +49,7 @@ pub enum Argument {
     Simple(String),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum ArgumentValue {
     Multiple(Vec<String>),

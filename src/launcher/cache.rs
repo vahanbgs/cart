@@ -87,7 +87,7 @@ impl Cache {
         Ok(path)
     }
 
-    fn path_from_url(&self, url: &Url) -> anyhow::Result<PathBuf> {
+    pub fn path_from_url(&self, url: &Url) -> anyhow::Result<PathBuf> {
         let Origin::Tuple(_, host, _) = url.origin() else {
             bail!("Could not extract host from URL: {}", url);
         };

@@ -1,5 +1,6 @@
 mod arguments;
 mod cache;
+pub mod forge;
 mod instance;
 mod java;
 
@@ -8,11 +9,13 @@ use tokio::fs;
 
 use std::{collections::HashMap, path::PathBuf};
 
+use anyhow::anyhow;
 use directories_next::ProjectDirs;
 use reqwest::Client;
 
 use crate::api::{
     Endpoint,
+    forge::ForgePromotions,
     piston::{Arguments, Version, VersionManifest},
 };
 use cache::{AssetCache, Cache, ModCache};
@@ -50,7 +53,7 @@ impl Launcher {
             instance.version()
         };
 
-        let version_info = &version_map.get(version_id).expect("unknown version");
+        let version_info = version_map.get(version_id).expect("unknown version");
         let version = self
             .cache
             .fetch_json::<Version>(&version_info.url, Some(&version_info.sha1))
@@ -64,9 +67,67 @@ impl Launcher {
         let java_path =
             java::fetch_java_distribution(version.java_version.component, &self.cache).await?;
 
+        // Fetch the vanilla client JAR (needed both for vanilla launch and as
+        // input to the Forge processor pipeline).
+        let vanilla_client_jar = self
+            .cache
+            .fetch(
+                &version.downloads.client.url,
+                Some(&version.downloads.client.sha1),
+            )
+            .await?;
+
         let natives_directory = tempfile::tempdir()?;
 
-        let classpath = java::build_class_path(&version, &natives_directory, &self.cache).await?;
+        // ── Forge ────────────────────────────────────────────────────────────
+        let (client_jar, forge_extra_libraries, forge_main_class, forge_game_args, forge_jvm_args) =
+            if let Some(forge_spec) = instance.forge_spec() {
+                let forge_version = if matches!(forge_spec, "latest" | "recommended") {
+                    let promotions = self
+                        .cache
+                        .fetch_json::<ForgePromotions>(ForgePromotions::url(), None)
+                        .await?;
+                    promotions
+                        .resolve(version_id, forge_spec)
+                        .ok_or_else(|| {
+                            anyhow!("no Forge {forge_spec} release for Minecraft {version_id}")
+                        })?
+                } else {
+                    format!("{version_id}-{forge_spec}")
+                };
+
+                let result =
+                    forge::install(&forge_version, &vanilla_client_jar, &java_path, &self.cache)
+                        .await?;
+
+                let fv = result.version;
+                let game_args = fv.minecraft_arguments.clone();
+                let jvm_args = fv.arguments.jvm.clone();
+                let game_args_modern = fv.arguments.game.clone();
+
+                let client_jar = result
+                    .patched_client_jar
+                    .unwrap_or_else(|| vanilla_client_jar.clone());
+
+                (
+                    client_jar,
+                    fv.libraries,
+                    Some(fv.main_class),
+                    (game_args, game_args_modern),
+                    jvm_args,
+                )
+            } else {
+                (vanilla_client_jar, vec![], None, (None, vec![]), vec![])
+            };
+
+        let classpath = java::build_class_path(
+            &version,
+            &client_jar,
+            &forge_extra_libraries,
+            &natives_directory,
+            &self.cache,
+        )
+        .await?;
 
         fs::create_dir_all(instance.directory()).await?;
 
@@ -96,9 +157,21 @@ impl Launcher {
             ("launcher_name", "cart".to_owned()),
             ("launcher_version", env!("CARGO_PKG_VERSION").to_owned()),
             ("classpath", classpath),
+            // Forge 1.17+ uses these to build the JPMS module path (`-p`) and
+            // for FMLLoader to locate processor outputs (PATCHED, MC_SRG, …).
+            // Must match the local dir used by the Forge install pipeline.
+            (
+                "library_directory",
+                forge::local_maven_dir(&self.cache)
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            ("classpath_separator", ":".to_owned()),
         ]
         .into_iter()
         .collect();
+
+        let main_class = forge_main_class.as_deref().unwrap_or(&version.main_class);
 
         let mut command = java::java_binary(&java_path);
         command.current_dir(instance.directory());
@@ -106,9 +179,24 @@ impl Launcher {
 
         match &version.arguments {
             Arguments::Modern { jvm, game } => {
+                // Vanilla JVM args first, then Forge JVM args.
                 command.args(arguments::resolve(jvm, &variables));
-                command.arg(&version.main_class);
+                command.args(arguments::resolve(&forge_jvm_args, &variables));
+                command.arg(main_class);
+                // Vanilla game args first, then Forge game args.
                 command.args(arguments::resolve(game, &variables));
+                match &forge_game_args {
+                    (Some(legacy), _) => {
+                        command.args(
+                            legacy
+                                .split_ascii_whitespace()
+                                .map(|t| arguments::substitute(t, &variables)),
+                        );
+                    }
+                    (None, modern) => {
+                        command.args(arguments::resolve(modern, &variables));
+                    }
+                }
             }
             Arguments::Legacy(minecraft_arguments) => {
                 command.args([
@@ -116,9 +204,12 @@ impl Launcher {
                     "-cp".to_owned(),
                     arguments::substitute("${classpath}", &variables),
                 ]);
-                command.arg(&version.main_class);
+                command.arg(main_class);
+                // Forge's minecraftArguments is a superset of vanilla's (it adds
+                // --tweakClass etc.) so use it instead of vanilla when present.
+                let game_args = forge_game_args.0.as_deref().unwrap_or(minecraft_arguments);
                 command.args(
-                    minecraft_arguments
+                    game_args
                         .split_ascii_whitespace()
                         .map(|token| arguments::substitute(token, &variables)),
                 );

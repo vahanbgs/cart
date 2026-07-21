@@ -19,9 +19,13 @@ impl Run {
         self.build.run_with(&config, &launcher).await?;
 
         let game_directory = config.manifest_directory().join("minecraft/");
-        let instance = Instance::builder()
-            .version(config.minecraft_version())
-            .build(game_directory);
+        let mut builder = Instance::builder().version(config.minecraft_version());
+
+        if let Some(forge) = config.manifest().forge.as_deref() {
+            builder = builder.forge_spec(forge);
+        }
+
+        let instance = builder.build(game_directory);
 
         launcher.launch(&instance).await
     }

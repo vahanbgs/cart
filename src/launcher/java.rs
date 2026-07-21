@@ -2,19 +2,31 @@ use std::{
     fs::Permissions,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 
+use anyhow::Context;
 use tempfile::TempDir;
 use tokio::{
     fs::{self, File},
     process::Command,
 };
+use url::Url;
 use zip::ZipArchive;
 
-use crate::api::piston::{
-    Action, FileSystemEntry, GameJarDownloadOptions, JavaDistribution, JavaDistributionManifest,
-    JavaPlatform, JavaVersionComponent, NativeClassifier, Os, Version,
+use crate::api::{
+    forge::MavenCoordinate,
+    piston::{
+        Action, FileSystemEntry, JavaDistribution, JavaDistributionManifest, JavaPlatform,
+        JavaVersionComponent, LibraryEntry, NativeClassifier, Os, Version,
+    },
 };
+
+static MOJANG_LIBRARIES_URL: LazyLock<Url> =
+    LazyLock::new(|| Url::parse("https://libraries.minecraft.net/").unwrap());
+
+static FORGE_MAVEN_URL: LazyLock<Url> =
+    LazyLock::new(|| Url::parse("https://maven.minecraftforge.net/").unwrap());
 
 use super::cache::Cache;
 
@@ -83,25 +95,19 @@ pub async fn fetch_java_distribution(
     Ok(java_distribution_path)
 }
 
-async fn fetch_game_client_jar(
-    game_jar_download_options: &GameJarDownloadOptions,
-    cache: &Cache,
-) -> anyhow::Result<PathBuf> {
-    let download_entry = &game_jar_download_options.client;
-
-    cache
-        .fetch(&download_entry.url, Some(&download_entry.sha1))
-        .await
-}
-
+/// Builds the `-cp` classpath string.
+///
+/// `client_jar` is the first entry — pass the vanilla client JAR for a plain
+/// launch or the Forge-patched JAR when Forge is active.  `extra_libraries` are
+/// appended after the vanilla libraries (used for Forge version libraries).
 pub async fn build_class_path(
     version_manifest: &Version,
+    client_jar: &Path,
+    extra_libraries: &[LibraryEntry],
     natives_directory: &TempDir,
     cache: &Cache,
 ) -> anyhow::Result<String> {
-    let game_client_jar_path = fetch_game_client_jar(&version_manifest.downloads, cache).await?;
-
-    let mut classpath = vec![game_client_jar_path.to_string_lossy().into_owned()];
+    let mut classpath = vec![client_jar.to_string_lossy().into_owned()];
 
     for library_entry in &version_manifest.libraries {
         let mut allow = library_entry.rules.is_none();
@@ -132,18 +138,55 @@ pub async fn build_class_path(
         }
 
         if let Some(artifact) = &library_entry.downloads.artifact {
-            let path = cache.fetch(&artifact.url, Some(&artifact.sha1)).await?;
-            classpath.push(path.to_string_lossy().into_owned());
+            if let Some(url) = &artifact.url {
+                let path = cache.fetch(url, Some(&artifact.sha1)).await?;
+                classpath.push(path.to_string_lossy().into_owned());
+            }
         }
 
         if let Some(native) = &library_entry.downloads.classifiers {
             if let Some(native) = native.get(&NativeClassifier::current()) {
-                let jar_path = cache.fetch(&native.url, Some(&native.sha1)).await?;
-                let jar_file = File::open(jar_path).await?;
-                let mut archive = ZipArchive::new(jar_file.into_std().await)?;
+                if let Some(url) = &native.url {
+                    let jar_path = cache.fetch(url, Some(&native.sha1)).await?;
+                    let jar_file = File::open(jar_path).await?;
+                    let mut archive = ZipArchive::new(jar_file.into_std().await)?;
 
-                archive.extract(natives_directory)?;
+                    archive.extract(natives_directory)?;
+                }
             }
+        }
+    }
+
+    for lib in extra_libraries {
+        if lib.clientreq == Some(false) {
+            continue;
+        }
+
+        if let Some(url) = lib.downloads.artifact.as_ref().and_then(|a| a.url.as_ref()) {
+            // Modern format: explicit download URL.
+            let sha1 = lib.downloads.artifact.as_ref().map(|a| &a.sha1);
+            let path = cache.fetch(url, sha1).await?;
+            classpath.push(path.to_string_lossy().into_owned());
+        } else if let Some(artifact) = &lib.downloads.artifact {
+            // downloads.artifact present but URL is empty: the JAR is bundled
+            // in the Forge installer. forge::install() already extracted it to
+            // the Forge Maven cache path derived from artifact.path.
+            let url = FORGE_MAVEN_URL
+                .join(&artifact.path.to_string_lossy())
+                .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
+            let path = cache.fetch(&url, Some(&artifact.sha1)).await?;
+            classpath.push(path.to_string_lossy().into_owned());
+        } else {
+            // Legacy format (no downloads field): build URL from lib.url base
+            // or the default Mojang libraries host.
+            let coord = MavenCoordinate::parse(&lib.name)
+                .with_context(|| format!("failed to parse Maven coordinate: {}", lib.name))?;
+            let base = lib.url.as_ref().unwrap_or(&MOJANG_LIBRARIES_URL);
+            let url = base
+                .join(&coord.to_path().to_string_lossy())
+                .with_context(|| format!("failed to build URL for library: {}", lib.name))?;
+            let path = cache.fetch(&url, None).await?;
+            classpath.push(path.to_string_lossy().into_owned());
         }
     }
 

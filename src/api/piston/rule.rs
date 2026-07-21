@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Rule {
     pub action: Action,
     pub os: Option<Os>,
@@ -14,14 +14,14 @@ pub enum Action {
     Disallow,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Os {
     Arch { arch: Arch },
     Name { name: OsName },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Arch {
     X86,
@@ -45,7 +45,7 @@ impl OsName {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Features {
     pub is_demo_user: Option<bool>,
     pub is_quick_play_realms: Option<bool>,
