@@ -204,6 +204,97 @@ async fn build_command_1_12_2_forge_recommended_has_expected_shape() {
     assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
 }
 
+/// 1.20.1 with `forge = "recommended"` — modern-era Forge. Main
+/// class is `cpw.mods.bootstraplauncher.BootstrapLauncher`, the
+/// launcher shells into it via a JPMS module path (`-p`) rather
+/// than launchwrapper. Forge's `Arguments::Modern` game arm carries
+/// `--launchTarget forgeclient` which is Forge's actual entry hook.
+#[tokio::test]
+#[ignore = "warms the shared cart cache on first run; also hits Forge promotions + installer + processor pipeline"]
+async fn build_command_1_20_1_forge_recommended_has_expected_shape() {
+    let game_dir = tempfile::tempdir().unwrap();
+    let instance = Instance::builder()
+        .version("1.20.1")
+        .forge_spec("recommended")
+        .build(game_dir.path().to_path_buf());
+
+    let launcher = Launcher::new();
+    let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
+
+    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let args: Vec<String> = command
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+
+    assert!(
+        program.contains("java"),
+        "expected bundled java runtime, got: {program}"
+    );
+    assert!(
+        args.iter()
+            .any(|a| a == "cpw.mods.bootstraplauncher.BootstrapLauncher"),
+        "expected bootstraplauncher main class in args:\n{args:#?}"
+    );
+
+    // `--launchTarget forgeclient` is the argument pair Forge appends
+    // to select its client entrypoint inside BootstrapLauncher. If
+    // Forge's modern-era game args ever fail to merge into the vanilla
+    // list, this pair goes missing and BootstrapLauncher errors out
+    // with "unknown target".
+    let target_index = args
+        .iter()
+        .position(|a| a == "--launchTarget")
+        .expect("expected --launchTarget in args");
+    assert_eq!(
+        args.get(target_index + 1).map(String::as_str),
+        Some("forgeclient"),
+        "wrong launchTarget value in args:\n{args:#?}"
+    );
+
+    // Modern Forge uses the JPMS module path — the `-p <path>` pair
+    // must be present or BootstrapLauncher can't resolve its modules.
+    // `${library_directory}` and `${classpath_separator}` also get
+    // substituted into the module path, so any unresolved template
+    // here is fatal.
+    let module_path_index = args
+        .iter()
+        .position(|a| a == "-p")
+        .expect("expected -p (module path) in args");
+    let module_path = args
+        .get(module_path_index + 1)
+        .expect("expected module path value after -p");
+    assert!(
+        !module_path.contains("${"),
+        "unresolved template in module path: {module_path}"
+    );
+    assert!(
+        module_path.contains("bootstraplauncher"),
+        "module path missing bootstraplauncher entry:\n{module_path}"
+    );
+
+    for var in [
+        "${classpath}",
+        "${natives_directory}",
+        "${assets_root}",
+        "${assets_index_name}",
+        "${game_directory}",
+        "${version_name}",
+        "${library_directory}",
+        "${classpath_separator}",
+    ] {
+        let leaked: Vec<&String> = args.iter().filter(|a| a.contains(var)).collect();
+        assert!(
+            leaked.is_empty(),
+            "critical template {var} left unresolved in: {leaked:#?}"
+        );
+    }
+
+    assert!(args.iter().any(|a| a == "-Xmx4G"), "missing -Xmx4G");
+    assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
+}
+
 /// 1.16.5 shares the `Arguments::Modern` code path with 1.20.1 but
 /// pulls a different Java runtime (major 8 vs. 17) and a different
 /// LWJGL library set. Catches version-specific classpath/Java-selection
