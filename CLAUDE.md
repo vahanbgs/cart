@@ -22,7 +22,7 @@ cargo test               # run tests
 cargo run -- init <path>          # create a new cart project at <path>
 cargo run -- build                # download mods into minecraft/mods/
 cargo run -- run                  # build + launch Minecraft
-cargo run -- --manifest <path> run  # explicit manifest path
+cargo run -- -C <dir> run           # explicit project directory (contains cart.toml)
 cargo run -- --mv 1.20.4 run      # override Minecraft version
 ```
 
@@ -31,7 +31,7 @@ cargo run -- --mv 1.20.4 run      # override Minecraft version
 The crate is structured as both a binary and a library. `src/main.rs` is the binary entry point; `src/lib.rs` exposes the public API (`Launcher`, `Instance`, `Sha1Digest`).
 
 **Data flow for `run`:**
-1. `Config::load` resolves the manifest — walks up from `cwd` looking for `cart.toml`, or uses `--manifest` flag
+1. `Config::load` resolves the manifest — walks up from `cwd` looking for `cart.toml`, or uses the `-C`/`--directory` flag to target a specific project dir
 2. `Launcher` (via `Cache`) fetches version manifests, Java distribution, game client jar, and library jars from Mojang's Piston API, storing them content-addressed on disk
 3. Mods are fetched from their URLs via `ModCache` and hard-linked into `<manifest_dir>/minecraft/mods/`
 4. The game is launched with the bundled Java binary, using a temp dir for natives

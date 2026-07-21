@@ -12,8 +12,10 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 pub struct Cli {
-    #[arg(long)]
-    pub manifest: Option<PathBuf>,
+    /// Run as if invoked from this directory. The cart project's `cart.toml`
+    /// is expected to live directly inside it. Mirrors `make -C` / `cargo -C`.
+    #[arg(short = 'C', long = "directory", value_name = "DIR", global = true)]
+    pub directory: Option<PathBuf>,
 
     #[arg(long = "mv")]
     pub minecraft_version: Option<String>,
@@ -23,13 +25,12 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Explicit `(project_dir, manifest_path)` pair when `-C` was passed.
+    /// `None` means walk up from cwd looking for `cart.toml`.
     pub fn manifest_path(&self) -> Option<(PathBuf, PathBuf)> {
-        if let Some(path) = &self.manifest {
-            path.parent()
-                .map(|parent| (parent.to_owned(), path.to_owned()))
-        } else {
-            None
-        }
+        self.directory
+            .as_ref()
+            .map(|dir| (dir.clone(), dir.join("cart.toml")))
     }
 }
 
