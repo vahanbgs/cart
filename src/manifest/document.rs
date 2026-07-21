@@ -162,6 +162,41 @@ pub fn set_mod_version(
     Ok(())
 }
 
+/// Overwrite `[mods].<name>.file` with `file_id`. CurseForge analogue of
+/// `set_mod_version`: errors if the entry isn't CurseForge-shaped, since
+/// writing a `file` key onto a Modrinth or URL entry would produce a
+/// hybrid that fails `ModDependency` deserialization.
+pub fn set_mod_file(
+    document: &mut DocumentMut,
+    name: &str,
+    file_id: u32,
+) -> anyhow::Result<()> {
+    let mods = mods_table_mut(document)?;
+    let entry = mods
+        .get_mut(name)
+        .ok_or_else(|| anyhow!("mod not found in [mods]: {name}"))?;
+
+    match entry {
+        Item::Value(Value::InlineTable(inline)) => {
+            if !inline.contains_key("curseforge") {
+                bail!(
+                    "[mods].{name} has no `curseforge` key — only CurseForge entries can have their file id updated"
+                );
+            }
+            inline.insert("file", Value::from(file_id as i64));
+            inline.fmt();
+        }
+        Item::Table(table) => {
+            if !table.contains_key("curseforge") {
+                bail!("[mods].{name} has no `curseforge` key");
+            }
+            table.insert("file", value(file_id as i64));
+        }
+        _ => bail!("[mods].{name} is not a table"),
+    }
+    Ok(())
+}
+
 fn mods_table_mut(document: &mut DocumentMut) -> anyhow::Result<&mut Table> {
     document
         .get_mut("mods")
@@ -451,6 +486,50 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
     fn set_version_errors_when_key_missing() {
         let mut doc = parse("[mods]\n");
         let err = set_mod_version(&mut doc, "jei", "2.0").unwrap_err();
+        assert!(err.to_string().contains("not found"), "unexpected: {err}");
+    }
+
+    // ---------- set_mod_file ----------
+
+    #[test]
+    fn set_file_overwrites_on_inline_table() {
+        let mut doc = parse(
+            "[mods]\njei = { curseforge = 238222, file = 8419086 }\n",
+        );
+        set_mod_file(&mut doc, "jei", 9000000).unwrap();
+        let out = doc.to_string();
+        assert!(out.contains("file = 9000000"), "{out}");
+        assert!(!out.contains("8419086"), "old file id leaked:\n{out}");
+    }
+
+    #[test]
+    fn set_file_works_on_subtable_form() {
+        let mut doc = parse(
+            "[mods.jei]\ncurseforge = 238222\nfile = 8419086\n",
+        );
+        set_mod_file(&mut doc, "jei", 9000000).unwrap();
+        assert!(doc.to_string().contains("file = 9000000"));
+    }
+
+    /// The Modrinth counterpart guard exists so that `cart update`
+    /// never accidentally cross-writes a CF field onto a Modrinth entry
+    /// — same rationale here in reverse.
+    #[test]
+    fn set_file_rejects_modrinth_entries() {
+        let mut doc = parse(
+            "[mods]\njei = { modrinth = \"jei\", version = \"1.0\" }\n",
+        );
+        let err = set_mod_file(&mut doc, "jei", 8419086).unwrap_err();
+        assert!(
+            err.to_string().contains("no `curseforge` key"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn set_file_errors_when_key_missing() {
+        let mut doc = parse("[mods]\n");
+        let err = set_mod_file(&mut doc, "jei", 8419086).unwrap_err();
         assert!(err.to_string().contains("not found"), "unexpected: {err}");
     }
 

@@ -3,7 +3,7 @@ mod mod_dependency;
 
 pub use document::{
     add_curseforge_mod, add_modrinth_mod, load_document, remove_mod, save_document,
-    set_mod_disabled, set_mod_version,
+    set_mod_disabled, set_mod_file, set_mod_version,
 };
 pub use mod_dependency::ModDependency;
 
