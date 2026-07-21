@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::Permissions,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -98,8 +99,15 @@ pub async fn fetch_java_distribution(
 /// Builds the `-cp` classpath string.
 ///
 /// `client_jar` is the first entry — pass the vanilla client JAR for a plain
-/// launch or the Forge-patched JAR when Forge is active.  `extra_libraries` are
-/// appended after the vanilla libraries (used for Forge version libraries).
+/// launch or the Forge-patched JAR when Forge is active. `extra_libraries` are
+/// merged after the vanilla libraries; entries with the same
+/// `groupId:artifactId[:classifier]` key REPLACE the earlier one rather than
+/// appending, matching the Mojang launcher's `inheritsFrom` semantics.
+///
+/// Without dedup, Forge for 1.16.5 (ships log4j 2.15.0) would end up with
+/// vanilla's log4j 2.8.1 also on the classpath and loaded first, so
+/// modlauncher (compiled against 2.15.0's API) crashes with
+/// `NoSuchMethodError` on ThrowablePatternConverter.
 pub async fn build_class_path(
     version_manifest: &Version,
     client_jar: &Path,
@@ -107,7 +115,17 @@ pub async fn build_class_path(
     natives_directory: &TempDir,
     cache: &Cache,
 ) -> anyhow::Result<String> {
-    let mut classpath = vec![client_jar.to_string_lossy().into_owned()];
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut key_positions: HashMap<String, usize> = HashMap::new();
+
+    // Client jar goes first with a synthetic key that can't collide with
+    // any real Maven coordinate.
+    add_classpath_entry(
+        &mut entries,
+        &mut key_positions,
+        "__client_jar__".to_string(),
+        client_jar.to_string_lossy().into_owned(),
+    );
 
     for library_entry in &version_manifest.libraries {
         let mut allow = library_entry.rules.is_none();
@@ -140,7 +158,12 @@ pub async fn build_class_path(
         if let Some(artifact) = &library_entry.downloads.artifact {
             if let Some(url) = &artifact.url {
                 let path = cache.fetch(url, Some(&artifact.sha1)).await?;
-                classpath.push(path.to_string_lossy().into_owned());
+                add_classpath_entry(
+                    &mut entries,
+                    &mut key_positions,
+                    dedup_key(&library_entry.name),
+                    path.to_string_lossy().into_owned(),
+                );
             }
         }
 
@@ -162,11 +185,10 @@ pub async fn build_class_path(
             continue;
         }
 
-        if let Some(url) = lib.downloads.artifact.as_ref().and_then(|a| a.url.as_ref()) {
+        let path = if let Some(url) = lib.downloads.artifact.as_ref().and_then(|a| a.url.as_ref()) {
             // Modern format: explicit download URL.
             let sha1 = lib.downloads.artifact.as_ref().map(|a| &a.sha1);
-            let path = cache.fetch(url, sha1).await?;
-            classpath.push(path.to_string_lossy().into_owned());
+            cache.fetch(url, sha1).await?
         } else if let Some(artifact) = &lib.downloads.artifact {
             // downloads.artifact present but URL is empty: the JAR is bundled
             // in the Forge installer. forge::install() already extracted it to
@@ -174,8 +196,7 @@ pub async fn build_class_path(
             let url = FORGE_MAVEN_URL
                 .join(&artifact.path.to_string_lossy())
                 .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
-            let path = cache.fetch(&url, Some(&artifact.sha1)).await?;
-            classpath.push(path.to_string_lossy().into_owned());
+            cache.fetch(&url, Some(&artifact.sha1)).await?
         } else {
             // Legacy format (no downloads field): build URL from lib.url base
             // or the default Mojang libraries host.
@@ -185,12 +206,48 @@ pub async fn build_class_path(
             let url = base
                 .join(&coord.to_path().to_string_lossy())
                 .with_context(|| format!("failed to build URL for library: {}", lib.name))?;
-            let path = cache.fetch(&url, None).await?;
-            classpath.push(path.to_string_lossy().into_owned());
-        }
+            cache.fetch(&url, None).await?
+        };
+
+        add_classpath_entry(
+            &mut entries,
+            &mut key_positions,
+            dedup_key(&lib.name),
+            path.to_string_lossy().into_owned(),
+        );
     }
 
-    Ok(classpath.join(":"))
+    let paths: Vec<String> = entries.into_iter().map(|(_, path)| path).collect();
+    Ok(paths.join(":"))
+}
+
+/// Maven coordinate → the key we dedup by: `groupId:artifactId[:classifier]`,
+/// dropping the version. Different-classifier entries stay separate (natives
+/// jars must coexist with their base artifact), same-classifier entries at
+/// different versions collapse to a single classpath slot.
+fn dedup_key(name: &str) -> String {
+    let parts: Vec<&str> = name.split(':').collect();
+    match parts.as_slice() {
+        [group, artifact, _version] => format!("{group}:{artifact}"),
+        [group, artifact, _version, classifier, ..] => {
+            format!("{group}:{artifact}:{classifier}")
+        }
+        _ => name.to_owned(),
+    }
+}
+
+fn add_classpath_entry(
+    entries: &mut Vec<(String, String)>,
+    key_positions: &mut HashMap<String, usize>,
+    key: String,
+    path: String,
+) {
+    if let Some(&idx) = key_positions.get(&key) {
+        entries[idx].1 = path;
+    } else {
+        key_positions.insert(key.clone(), entries.len());
+        entries.push((key, path));
+    }
 }
 
 pub fn java_binary(java_path: &Path) -> Command {
