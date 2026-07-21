@@ -1,7 +1,10 @@
 use std::{collections::HashSet, path::Path};
 
-use anyhow::bail;
-use cart::{Launcher, api::modrinth};
+use anyhow::{Context, anyhow, bail};
+use cart::{
+    Launcher,
+    api::{curseforge, modrinth},
+};
 use clap::Args;
 use reqwest::Client;
 use tokio::{fs, io};
@@ -11,6 +14,10 @@ use crate::{
     config::Config,
     manifest::{Manifest, ModDependency},
 };
+
+/// Env var holding the CurseForge API key. Every CurseForge endpoint
+/// requires `x-api-key`; a missing/invalid key means an unavoidable 403.
+const CURSEFORGE_API_KEY_ENV: &str = "CURSEFORGE_API_KEY";
 
 use super::Cli;
 
@@ -54,15 +61,38 @@ impl Build {
     }
 }
 
+/// Build a CurseForge-authenticated HTTP client if the manifest has any
+/// CurseForge entries. Absent entries skip the env-var read so users
+/// without a key can still build Modrinth/URL-only packs.
+fn build_curseforge_client_if_needed(manifest: &Manifest) -> anyhow::Result<Option<Client>> {
+    let has_curseforge = manifest
+        .mods
+        .values()
+        .any(|dep| matches!(dep, ModDependency::CurseForge { .. }));
+    if !has_curseforge {
+        return Ok(None);
+    }
+    let key = std::env::var(CURSEFORGE_API_KEY_ENV).with_context(|| {
+        format!(
+            "cart.toml declares a curseforge = <id> entry but {CURSEFORGE_API_KEY_ENV} is not \
+             set — get a key at https://console.curseforge.com/ and export it"
+        )
+    })?;
+    Ok(Some(curseforge::client(&key)?))
+}
+
 /// Turn a `ModDependency` into the URL the mod-cache should fetch.
 ///
 /// URL entries pass through untouched (they're fully user-pinned). Modrinth
 /// entries hit the API to resolve to the concrete file URL — pinned by
-/// `version_number` if set, newest compatible otherwise.
+/// `version_number` if set, newest compatible otherwise. CurseForge entries
+/// hit the CF API for the file's `downloadUrl` (a CDN URL that itself
+/// needs no auth), which is what gets returned to the shared cache.
 async fn resolve_url(
     dep: &ModDependency,
     manifest: &Manifest,
     http: &Client,
+    curseforge_http: Option<&Client>,
 ) -> anyhow::Result<Url> {
     match dep {
         ModDependency::Url { url, .. } => Ok(url.clone()),
@@ -85,11 +115,21 @@ async fn resolve_url(
             .await?;
             Ok(resolved.file.url)
         }
-        // Wired up in a follow-up commit — until then a CurseForge
-        // entry in cart.toml fails the build loudly rather than
-        // silently skipping.
-        ModDependency::CurseForge { .. } => {
-            anyhow::bail!("CurseForge mod fetch not yet implemented")
+        ModDependency::CurseForge {
+            curseforge: project_id,
+            file: file_id,
+            ..
+        } => {
+            let cf = curseforge_http
+                .expect("sync_mods should have built the CurseForge client");
+            let file = curseforge::fetch_file(cf, *project_id, *file_id).await?;
+            file.download_url.ok_or_else(|| {
+                anyhow!(
+                    "curseforge project {project_id} file {file_id} disallows third-party \
+                     API downloads (owner opted out); download the jar manually and use a \
+                     url = \"...\" entry instead"
+                )
+            })
         }
     }
 }
@@ -109,8 +149,11 @@ async fn sync_mods(
     prune_stale_jars(mods_directory, &expected).await?;
 
     let http = Client::new();
+    let curseforge_http = build_curseforge_client_if_needed(config.manifest())?;
+
     for (mod_name, mod_source) in &config.manifest().mods {
-        let url = resolve_url(mod_source, config.manifest(), &http).await?;
+        let url =
+            resolve_url(mod_source, config.manifest(), &http, curseforge_http.as_ref()).await?;
         let cached = tokio::fs::try_exists(cache.path_from_url(&url)?).await?;
         tracing::info!(
             "{action} {mod_name}",
