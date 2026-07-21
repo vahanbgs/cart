@@ -100,6 +100,40 @@ pub fn set_mod_disabled(
     Ok(())
 }
 
+/// Overwrite `[mods].<name>.version` with `version`. Errors if the entry
+/// isn't a Modrinth-shaped table — URL entries have no meaningful version
+/// to set, and `cart update` should never call this for them.
+pub fn set_mod_version(
+    document: &mut DocumentMut,
+    name: &str,
+    version: &str,
+) -> anyhow::Result<()> {
+    let mods = mods_table_mut(document)?;
+    let entry = mods
+        .get_mut(name)
+        .ok_or_else(|| anyhow!("mod not found in [mods]: {name}"))?;
+
+    match entry {
+        Item::Value(Value::InlineTable(inline)) => {
+            if !inline.contains_key("modrinth") {
+                bail!(
+                    "[mods].{name} has no `modrinth` key — only Modrinth entries can be version-pinned"
+                );
+            }
+            inline.insert("version", Value::from(version));
+            inline.fmt();
+        }
+        Item::Table(table) => {
+            if !table.contains_key("modrinth") {
+                bail!("[mods].{name} has no `modrinth` key");
+            }
+            table.insert("version", value(version));
+        }
+        _ => bail!("[mods].{name} is not a table"),
+    }
+    Ok(())
+}
+
 fn mods_table_mut(document: &mut DocumentMut) -> anyhow::Result<&mut Table> {
     document
         .get_mut("mods")

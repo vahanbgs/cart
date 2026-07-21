@@ -2,7 +2,7 @@ mod document;
 mod mod_dependency;
 
 pub use document::{
-    add_modrinth_mod, load_document, remove_mod, save_document, set_mod_disabled,
+    add_modrinth_mod, load_document, remove_mod, save_document, set_mod_disabled, set_mod_version,
 };
 pub use mod_dependency::ModDependency;
 

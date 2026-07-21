@@ -6,6 +6,7 @@ mod init;
 mod list;
 mod remove;
 mod run;
+mod update;
 
 pub use add::Add;
 pub use build::Build;
@@ -15,6 +16,7 @@ pub use init::Init;
 pub use list::List;
 pub use remove::Remove;
 pub use run::Run;
+pub use update::Update;
 
 use std::path::PathBuf;
 
@@ -59,4 +61,5 @@ pub enum Subcommands {
     Remove(Remove),
     Disable(Disable),
     Enable(Enable),
+    Update(Update),
 }

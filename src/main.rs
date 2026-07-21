@@ -53,6 +53,9 @@ async fn main() -> anyhow::Result<()> {
         Subcommands::Enable(enable) => {
             enable.run(&cli).await?;
         }
+        Subcommands::Update(update) => {
+            update.run(&cli).await?;
+        }
     }
 
     Ok(())
