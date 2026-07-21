@@ -122,6 +122,88 @@ async fn build_command_1_12_2_vanilla_has_expected_shape() {
     assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
 }
 
+/// 1.12.2 with `forge = "recommended"` — exercises the full Forge
+/// resolution path (promotions API → installer → local maven layout)
+/// on top of the Legacy-arguments launcher code. Main class is still
+/// launchwrapper's; Forge injects itself via `--tweakClass
+/// net.minecraftforge.fml.common.launcher.FMLTweaker` in the game
+/// args, which is the assertion that pins Forge actually got wired.
+#[tokio::test]
+#[ignore = "warms the shared cart cache on first run; also hits Forge promotions + installer"]
+async fn build_command_1_12_2_forge_recommended_has_expected_shape() {
+    let game_dir = tempfile::tempdir().unwrap();
+    let instance = Instance::builder()
+        .version("1.12.2")
+        .forge_spec("recommended")
+        .build(game_dir.path().to_path_buf());
+
+    let launcher = Launcher::new();
+    let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
+
+    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let args: Vec<String> = command
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+
+    assert!(
+        program.contains("java"),
+        "expected bundled java runtime, got: {program}"
+    );
+    assert!(
+        args.iter().any(|a| a == "net.minecraft.launchwrapper.Launch"),
+        "expected launchwrapper main class in args:\n{args:#?}"
+    );
+
+    // The `--tweakClass <FMLTweaker>` pair is Forge's actual entry
+    // point on 1.12.2 — launchwrapper delegates to it. If Forge's
+    // `minecraftArguments` are ever dropped instead of merged with
+    // vanilla's, this pair goes missing and mods never load.
+    let tweak_index = args
+        .iter()
+        .position(|a| a == "--tweakClass")
+        .expect("expected --tweakClass in args");
+    assert_eq!(
+        args.get(tweak_index + 1).map(String::as_str),
+        Some("net.minecraftforge.fml.common.launcher.FMLTweaker"),
+        "wrong tweakClass value in args:\n{args:#?}"
+    );
+
+    for var in [
+        "${classpath}",
+        "${natives_directory}",
+        "${assets_root}",
+        "${assets_index_name}",
+        "${game_directory}",
+        "${version_name}",
+    ] {
+        let leaked: Vec<&String> = args.iter().filter(|a| a.contains(var)).collect();
+        assert!(
+            leaked.is_empty(),
+            "critical template {var} left unresolved in: {leaked:#?}"
+        );
+    }
+
+    // Forge for 1.12.2 ships specific classpath entries — proving at
+    // least one Forge jar is on the classpath separates a real Forge
+    // launch from vanilla-with-forge-flag-ignored.
+    let classpath_index = args
+        .iter()
+        .position(|a| a == "-cp")
+        .expect("expected -cp in args");
+    let classpath = args
+        .get(classpath_index + 1)
+        .expect("expected classpath value after -cp");
+    assert!(
+        classpath.contains("forge"),
+        "no forge-named entry on classpath — Forge libraries missing?\n{classpath}"
+    );
+
+    assert!(args.iter().any(|a| a == "-Xmx4G"), "missing -Xmx4G");
+    assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
+}
+
 /// 1.16.5 shares the `Arguments::Modern` code path with 1.20.1 but
 /// pulls a different Java runtime (major 8 vs. 17) and a different
 /// LWJGL library set. Catches version-specific classpath/Java-selection
