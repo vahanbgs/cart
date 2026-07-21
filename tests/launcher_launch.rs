@@ -140,3 +140,9 @@ async fn launches_b1_7_vanilla() {
 async fn launches_1_12_2_forge_recommended() {
     assert_launches_with_forge_cleanly("1.12.2", "recommended", Duration::from_secs(15)).await;
 }
+
+#[tokio::test]
+#[ignore = "spawns Minecraft — needs a display (see file header)"]
+async fn launches_1_20_1_forge_recommended() {
+    assert_launches_with_forge_cleanly("1.20.1", "recommended", Duration::from_secs(15)).await;
+}
