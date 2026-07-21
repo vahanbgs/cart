@@ -1,11 +1,16 @@
 use std::{collections::HashSet, path::Path};
 
 use anyhow::bail;
-use cart::Launcher;
+use cart::{Launcher, api::modrinth};
 use clap::Args;
+use reqwest::Client;
 use tokio::{fs, io};
+use url::Url;
 
-use crate::{config::Config, manifest::ModDependency};
+use crate::{
+    config::Config,
+    manifest::{Manifest, ModDependency},
+};
 
 use super::Cli;
 
@@ -49,6 +54,40 @@ impl Build {
     }
 }
 
+/// Turn a `ModDependency` into the URL the mod-cache should fetch.
+///
+/// URL entries pass through untouched (they're fully user-pinned). Modrinth
+/// entries hit the API to resolve to the concrete file URL — pinned by
+/// `version_number` if set, newest compatible otherwise.
+async fn resolve_url(
+    dep: &ModDependency,
+    manifest: &Manifest,
+    http: &Client,
+) -> anyhow::Result<Url> {
+    match dep {
+        ModDependency::Url { url, .. } => Ok(url.clone()),
+        ModDependency::Modrinth {
+            modrinth, version, ..
+        } => {
+            // TODO: expand when the manifest grows Fabric/NeoForge fields.
+            let loader = if manifest.forge.is_some() {
+                "forge"
+            } else {
+                "vanilla"
+            };
+            let resolved = modrinth::resolve(
+                http,
+                modrinth,
+                version.as_deref(),
+                &manifest.minecraft,
+                loader,
+            )
+            .await?;
+            Ok(resolved.file.url)
+        }
+    }
+}
+
 async fn sync_mods(
     config: &Config<'_>,
     cache: &cart::ModCache<'_>,
@@ -79,17 +118,15 @@ async fn sync_mods(
         }
     }
 
+    let http = Client::new();
     for (mod_name, mod_source) in &config.manifest().mods {
-        let source_path = match mod_source {
-            ModDependency::Url { url, .. } => {
-                let cached = tokio::fs::try_exists(cache.path_from_url(url)?).await?;
-                tracing::info!(
-                    "{action} {mod_name}",
-                    action = if cached { "cached  " } else { "download" },
-                );
-                cache.fetch_mod(url).await?
-            }
-        };
+        let url = resolve_url(mod_source, config.manifest(), &http).await?;
+        let cached = tokio::fs::try_exists(cache.path_from_url(&url)?).await?;
+        tracing::info!(
+            "{action} {mod_name}",
+            action = if cached { "cached  " } else { "download" },
+        );
+        let source_path = cache.fetch_mod(&url).await?;
 
         let target_path = mods_directory.join(mod_source.filename(mod_name));
 

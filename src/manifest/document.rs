@@ -3,7 +3,6 @@ use std::path::Path;
 use anyhow::{Context, anyhow, bail};
 use tokio::fs;
 use toml_edit::{DocumentMut, InlineTable, Item, Table, Value, value};
-use url::Url;
 
 /// Parse `cart.toml` into a `DocumentMut` that preserves comments, blank
 /// lines, and key ordering — so future write commands can mutate one entry
@@ -22,13 +21,14 @@ pub async fn save_document(path: &Path, document: &DocumentMut) -> anyhow::Resul
         .with_context(|| format!("failed to write manifest at {}", path.display()))
 }
 
-/// Add `[mods].<name> = { url = "…" }` to the document. Errors if the key
-/// already exists — overwrite would silently discard a user-configured
-/// entry.
-pub fn add_mod(
+/// Add `[mods].<name> = { modrinth = "<slug>", version = "<v>" }` to the
+/// document. Errors if the key already exists — overwrite would silently
+/// discard a user-configured entry.
+pub fn add_modrinth_mod(
     document: &mut DocumentMut,
     name: &str,
-    url: &Url,
+    slug: &str,
+    version: &str,
     disabled: bool,
 ) -> anyhow::Result<()> {
     let mods = mods_table_mut_or_create(document);
@@ -37,7 +37,8 @@ pub fn add_mod(
     }
 
     let mut inline = InlineTable::new();
-    inline.insert("url", Value::from(url.as_str()));
+    inline.insert("modrinth", Value::from(slug));
+    inline.insert("version", Value::from(version));
     if disabled {
         inline.insert("disabled", Value::from(true));
     }

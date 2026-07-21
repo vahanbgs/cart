@@ -1,6 +1,8 @@
 use std::sync::LazyLock;
 
+use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
+use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use url::Url;
 
@@ -42,7 +44,7 @@ pub struct Version {
     pub dependencies: Vec<VersionDependency>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct VersionFile {
     pub url: Url,
     pub filename: String,
@@ -63,4 +65,72 @@ pub enum DependencyType {
     Optional,
     Incompatible,
     Embedded,
+}
+
+/// One resolved Modrinth version — a specific file at a specific version,
+/// with everything callers need for both `cart add` (project title,
+/// dependencies for warnings) and `cart build` (URL to fetch).
+pub struct ResolvedVersion {
+    pub project_slug: String,
+    pub project_title: String,
+    pub version_number: String,
+    pub file: VersionFile,
+    pub dependencies: Vec<VersionDependency>,
+}
+
+/// Resolve a `(slug, optional pinned version, mc, loader)` tuple to a
+/// concrete file. Shared by `cart add` (pins by writing the returned
+/// `version_number`) and `cart build` (fetches the returned `file.url`).
+pub async fn resolve(
+    http: &Client,
+    slug: &str,
+    version: Option<&str>,
+    minecraft_version: &str,
+    loader: &str,
+) -> anyhow::Result<ResolvedVersion> {
+    let project_response = http.get(project_url(slug)).send().await?;
+    if project_response.status() == StatusCode::NOT_FOUND {
+        bail!("slug '{slug}' not found on Modrinth");
+    }
+    let project: Project = project_response.error_for_status()?.json().await?;
+
+    let versions: Vec<Version> = http
+        .get(versions_url(slug, minecraft_version, loader))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    let picked = match version {
+        Some(pin) => versions
+            .into_iter()
+            .find(|v| v.version_number == pin)
+            .with_context(|| {
+                format!(
+                    "no version '{pin}' of '{slug}' compatible with minecraft {minecraft_version} + {loader}"
+                )
+            })?,
+        None => versions.into_iter().max_by_key(|v| v.date_published).with_context(|| {
+            format!(
+                "no version of '{slug}' compatible with minecraft {minecraft_version} + {loader}"
+            )
+        })?,
+    };
+
+    let file = picked
+        .files
+        .iter()
+        .find(|f| f.primary)
+        .or_else(|| picked.files.first())
+        .with_context(|| format!("modrinth version {} has no files", picked.version_number))?
+        .clone();
+
+    Ok(ResolvedVersion {
+        project_slug: project.slug,
+        project_title: project.title,
+        version_number: picked.version_number,
+        file,
+        dependencies: picked.dependencies,
+    })
 }

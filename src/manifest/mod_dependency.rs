@@ -4,9 +4,20 @@ use url::Url;
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum ModDependency {
+    /// Sourced from Modrinth by project slug. If `version` is `None`, the
+    /// entry is "loose" — `cart build` resolves it to the newest version
+    /// compatible with the manifest's Minecraft version + loader.
+    Modrinth {
+        modrinth: String,
+        #[serde(default)]
+        version: Option<String>,
+        #[serde(default)]
+        disabled: bool,
+    },
+    /// Raw URL — the escape hatch for anything not on Modrinth. Fully
+    /// pinned by the URL; `cart update` skips these entries.
     Url {
         url: Url,
-        /// Place the mod as `<name>.jar.disabled` so Forge/Fabric skips it.
         #[serde(default)]
         disabled: bool,
     },
@@ -15,7 +26,7 @@ pub enum ModDependency {
 impl ModDependency {
     pub fn is_disabled(&self) -> bool {
         match self {
-            Self::Url { disabled, .. } => *disabled,
+            Self::Modrinth { disabled, .. } | Self::Url { disabled, .. } => *disabled,
         }
     }
 
