@@ -48,6 +48,34 @@ pub fn add_modrinth_mod(
     Ok(())
 }
 
+/// Add `[mods].<name> = { curseforge = <projectId>, file = <fileId> }` to
+/// the document. Same duplicate-key guard as `add_modrinth_mod`. IDs are
+/// numeric because CurseForge slugs can rename but IDs are permanent —
+/// callers resolve the slug at add-time and pin only the IDs.
+pub fn add_curseforge_mod(
+    document: &mut DocumentMut,
+    name: &str,
+    project_id: u32,
+    file_id: u32,
+    disabled: bool,
+) -> anyhow::Result<()> {
+    let mods = mods_table_mut_or_create(document);
+    if mods.contains_key(name) {
+        bail!("mod already declared in [mods]: {name}");
+    }
+
+    let mut inline = InlineTable::new();
+    inline.insert("curseforge", Value::from(project_id as i64));
+    inline.insert("file", Value::from(file_id as i64));
+    if disabled {
+        inline.insert("disabled", Value::from(true));
+    }
+    inline.fmt();
+    mods.insert(name, Item::Value(Value::InlineTable(inline)));
+
+    Ok(())
+}
+
 /// Remove `[mods].<name>` from the document. Errors if `[mods]` is absent
 /// or the entry doesn't exist — silently succeeding on a typo would be a
 /// footgun.
@@ -241,6 +269,50 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
         assert!(
             out.contains(r#"jei = { modrinth = "jei", version = "1.0" }"#),
             "jei should have no `disabled` key:\n{out}"
+        );
+    }
+
+    // ---------- add_curseforge_mod ----------
+
+    #[test]
+    fn add_curseforge_creates_mods_table_when_missing() {
+        let mut doc = parse("minecraft = \"1.20.1\"\n");
+        add_curseforge_mod(&mut doc, "jei", 238222, 8419086, false).unwrap();
+        let out = doc.to_string();
+        assert!(out.contains("[mods]"), "missing [mods] header:\n{out}");
+        assert!(
+            out.contains("jei = { curseforge = 238222, file = 8419086 }"),
+            "wrong inline shape:\n{out}"
+        );
+    }
+
+    #[test]
+    fn add_curseforge_writes_disabled_only_when_requested() {
+        let mut doc = parse("[mods]\n");
+        add_curseforge_mod(&mut doc, "wip", 238222, 8419086, true).unwrap();
+        add_curseforge_mod(&mut doc, "jei", 238222, 8419086, false).unwrap();
+        let out = doc.to_string();
+        assert!(
+            out.contains(
+                "wip = { curseforge = 238222, file = 8419086, disabled = true }"
+            ),
+            "expected disabled=true on wip:\n{out}"
+        );
+        assert!(
+            out.contains("jei = { curseforge = 238222, file = 8419086 }"),
+            "jei should have no `disabled` key:\n{out}"
+        );
+    }
+
+    #[test]
+    fn add_curseforge_rejects_duplicate_key() {
+        let mut doc = parse(
+            "[mods]\njei = { curseforge = 238222, file = 8419086 }\n",
+        );
+        let err = add_curseforge_mod(&mut doc, "jei", 238222, 9999999, false).unwrap_err();
+        assert!(
+            err.to_string().contains("already declared"),
+            "unexpected error: {err}"
         );
     }
 
