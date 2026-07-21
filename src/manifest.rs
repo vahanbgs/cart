@@ -17,6 +17,7 @@ use crate::Cli;
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
     pub minecraft: String,
+    pub forge: Option<String>,
     pub mods: HashMap<String, ModDependency>,
 }
 
@@ -28,6 +29,7 @@ impl Manifest {
                 .as_deref()
                 .unwrap_or("latest")
                 .to_owned(),
+            forge: None,
             mods: Default::default(),
         }
     }
