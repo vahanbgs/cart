@@ -1,0 +1,188 @@
+[
+  {
+    "game_versions": [
+      "1.20.1"
+    ],
+    "loaders": [
+      "forge",
+      "neoforge"
+    ],
+    "id": "kJ9LD194",
+    "project_id": "rxIIYO6c",
+    "author_id": "M8sIi0fq",
+    "featured": false,
+    "name": "Tinkers' Construct 3.11.2.166",
+    "version_number": "3.11.2.166",
+    "changelog": "Hotfix to fix an issue with slot preservation and other mods soulbound, plus some damage type tag issues with Twilight Forest compatability.\n\nFor a full changelog, see https://github.com/SlimeKnights/TinkersConstruct/releases/tag/v3.11.2.166",
+    "changelog_url": null,
+    "date_published": "2026-01-12T04:13:27.233744Z",
+    "downloads": 800432,
+    "version_type": "release",
+    "status": "listed",
+    "requested_status": null,
+    "files": [
+      {
+        "id": "iWVX2B4P",
+        "hashes": {
+          "sha512": "69da7399162b4de18b3eedf701f6013727ec4ae14b1b746265513bea6c4e88ad64ccb1187d3abca2387aafd37a91c21c56ce9b6fa7b0c26df17dfc1ac8d6a916",
+          "sha1": "94d07ec0ff45c49f5908beff7acb9fbec43fdde5"
+        },
+        "url": "https://cdn.modrinth.com/data/rxIIYO6c/versions/kJ9LD194/TConstruct-1.20.1-3.11.2.166.jar",
+        "filename": "TConstruct-1.20.1-3.11.2.166.jar",
+        "primary": true,
+        "size": 21572031,
+        "file_type": null
+      },
+      {
+        "id": "eV0iJ3ia",
+        "hashes": {
+          "sha1": "0b5c60df75f7b347602be9877da1e738c83de664",
+          "sha512": "61aabae3d5ce3c2fa6a1b2c1a727aaa68a1fbf3c2a33ddb6751c06c82c00608100ac2345bd739f41ee98a97ad5d8e9fbe596ad29a3c221598ff3b1cd19f1ffc3"
+        },
+        "url": "https://cdn.modrinth.com/data/rxIIYO6c/versions/kJ9LD194/TConstruct-1.20.1-3.11.2.166-sources.jar",
+        "filename": "TConstruct-1.20.1-3.11.2.166-sources.jar",
+        "primary": false,
+        "size": 2605866,
+        "file_type": "sources-jar"
+      }
+    ],
+    "dependencies": [
+      {
+        "version_id": null,
+        "project_id": "Cg6Uc79H",
+        "file_name": null,
+        "dependency_type": "required"
+      },
+      {
+        "version_id": null,
+        "project_id": "u6dRKJwZ",
+        "file_name": null,
+        "dependency_type": "optional"
+      }
+    ]
+  },
+  {
+    "game_versions": [
+      "1.20.1"
+    ],
+    "loaders": [
+      "forge",
+      "neoforge"
+    ],
+    "id": "aQ92LlLJ",
+    "project_id": "rxIIYO6c",
+    "author_id": "M8sIi0fq",
+    "featured": false,
+    "name": "Slimeworld Part 2 for 1.20.1",
+    "version_number": "3.11.2.165",
+    "changelog": "Bug fix update for Throwback update plus Slimeworld update.\n\nFor a full changelog, see https://github.com/SlimeKnights/TinkersConstruct/releases/tag/v3.11.2.165",
+    "changelog_url": null,
+    "date_published": "2026-01-10T22:16:06.554156Z",
+    "downloads": 7050,
+    "version_type": "release",
+    "status": "listed",
+    "requested_status": null,
+    "files": [
+      {
+        "id": "sUTbDWgS",
+        "hashes": {
+          "sha512": "6a132280d42d7c13f79ff451f08717529811f723bc6446a9f3d274bde6ba9fdcba31b8e2ed3a620ee09a87979b10823e67f0557c9c3d12ea4236405b9331512d",
+          "sha1": "a4e8203454a9c7424687ec9aa6f5d6e69555b864"
+        },
+        "url": "https://cdn.modrinth.com/data/rxIIYO6c/versions/aQ92LlLJ/TConstruct-1.20.1-3.11.2.165.jar",
+        "filename": "TConstruct-1.20.1-3.11.2.165.jar",
+        "primary": true,
+        "size": 21572296,
+        "file_type": null
+      },
+      {
+        "id": "wO0luGZT",
+        "hashes": {
+          "sha512": "28407d940c5372933fc24a8c629aba38ce98ce3934b927fb04dd4ef36f218005e03a60d0e5c70d4bee45f4005620cbc8dd123dc9c6468359670d8546f4fd122f",
+          "sha1": "7f01f184fdbf392cbd0cd9df1841278d67ca8208"
+        },
+        "url": "https://cdn.modrinth.com/data/rxIIYO6c/versions/aQ92LlLJ/TConstruct-1.20.1-3.11.2.165-sources.jar",
+        "filename": "TConstruct-1.20.1-3.11.2.165-sources.jar",
+        "primary": false,
+        "size": 2605838,
+        "file_type": "sources-jar"
+      }
+    ],
+    "dependencies": [
+      {
+        "version_id": null,
+        "project_id": "u6dRKJwZ",
+        "file_name": null,
+        "dependency_type": "optional"
+      },
+      {
+        "version_id": null,
+        "project_id": "Cg6Uc79H",
+        "file_name": null,
+        "dependency_type": "required"
+      }
+    ]
+  },
+  {
+    "game_versions": [
+      "1.20.1"
+    ],
+    "loaders": [
+      "forge",
+      "neoforge"
+    ],
+    "id": "WrXzoWRa",
+    "project_id": "rxIIYO6c",
+    "author_id": "M8sIi0fq",
+    "featured": false,
+    "name": "Slimeworld Update for 1.20.1",
+    "version_number": "3.11.1.158",
+    "changelog": "This update is primarily bug fixes and balance tweaks to the Throwback update, though it also provides a few smaller features such as cactus tool materials, slinging using traits, and worldgen improvements.\n\nFor a full changelog, see https://github.com/SlimeKnights/TinkersConstruct/releases/tag/v3.11.1.158",
+    "changelog_url": null,
+    "date_published": "2026-01-05T06:27:08.406491Z",
+    "downloads": 31397,
+    "version_type": "release",
+    "status": "listed",
+    "requested_status": null,
+    "files": [
+      {
+        "id": "vYLcR322",
+        "hashes": {
+          "sha1": "5084f883390b2dbb337ce53213fd5dfdd3cc57e5",
+          "sha512": "06f988a89b5d6b102b1f5971194d0ad0053a45d645afdff866692a81f8db6296fcf8f098b5c2c4f6024ac26118e60f6930e641bff16f85a64b9a2218ed747eca"
+        },
+        "url": "https://cdn.modrinth.com/data/rxIIYO6c/versions/WrXzoWRa/TConstruct-1.20.1-3.11.1.158.jar",
+        "filename": "TConstruct-1.20.1-3.11.1.158.jar",
+        "primary": true,
+        "size": 21473868,
+        "file_type": null
+      },
+      {
+        "id": "UysENfMk",
+        "hashes": {
+          "sha1": "f978e23336b1f263cebcb88adf2aa10133374ab8",
+          "sha512": "d07b43eab8f8eef73aaf9d943af8424008e0cf3e1044e3b6547bdb8ec00ed261e89014cca9dcb56c2058a2df175cf02c12d380306879b3a8895980b8c0e3c996"
+        },
+        "url": "https://cdn.modrinth.com/data/rxIIYO6c/versions/WrXzoWRa/TConstruct-1.20.1-3.11.1.158-sources.jar",
+        "filename": "TConstruct-1.20.1-3.11.1.158-sources.jar",
+        "primary": false,
+        "size": 2603666,
+        "file_type": "sources-jar"
+      }
+    ],
+    "dependencies": [
+      {
+        "version_id": null,
+        "project_id": "u6dRKJwZ",
+        "file_name": null,
+        "dependency_type": "optional"
+      },
+      {
+        "version_id": null,
+        "project_id": "Cg6Uc79H",
+        "file_name": null,
+        "dependency_type": "required"
+      }
+    ]
+  }
+]

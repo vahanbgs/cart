@@ -1,0 +1,182 @@
+[
+  {
+    "game_versions": [
+      "1.20.1"
+    ],
+    "loaders": [
+      "forge"
+    ],
+    "id": "ujE6Mlsq",
+    "project_id": "u6dRKJwZ",
+    "author_id": "nMXRSbhF",
+    "featured": false,
+    "name": "15.20.0.134 for Forge 1.20.1",
+    "version_number": "15.20.0.134",
+    "changelog": "  * [Test catalyst recipe lookup deduplication](https://github.com/mezz/JustEnoughItems/commit/8a0dc2e209c8b0b914fa4abba4fde8967f7bacc3) - mezz\n  * [Fix full carried stack give command](https://github.com/mezz/JustEnoughItems/commit/4971b4d5c7fbee878f8a24b3236f7c4c3c7bd495) - mezz\n  * [Fix catalyst layout with small areas](https://github.com/mezz/JustEnoughItems/commit/9cfd3dec52625b93b7da9ce36781feda3cd8802a) - mezz\n  * [Harden oversized recipe transfer packets](https://github.com/mezz/JustEnoughItems/commit/e6f046f8b371a7f28aaa304afe712053df9717bc) - mezz\n  * [Test ElementSearch ingredients](https://github.com/mezz/JustEnoughItems/commit/a819400cd2f014c644cda40434e675614dc4c27c) - mezz\n  * [Fix recipe button input priority](https://github.com/mezz/JustEnoughItems/commit/b9c3ec57492253e6c3a505b54906d233af7849bc) - mezz\n  * [Fix transfer error pose stack cleanup](https://github.com/mezz/JustEnoughItems/commit/c0fa582ad4420847fc4ff281ce61b3fc69650631) - mezz\n",
+    "changelog_url": null,
+    "date_published": "2026-07-12T14:26:26.002198Z",
+    "downloads": 195154,
+    "version_type": "beta",
+    "status": "listed",
+    "requested_status": null,
+    "files": [
+      {
+        "id": "3ZcWXxBe",
+        "hashes": {
+          "sha512": "2e4ee71c09b681ec4e9617b138ac2e27b7ad2efc780fee7e212754be8f71aa7774bb5e948ba404848844262bff658d8f0752f24c789b9c9d53c1be1e0a69fd78",
+          "sha1": "1150671952108303b4b02d2b09f42877fe14b138"
+        },
+        "url": "https://cdn.modrinth.com/data/u6dRKJwZ/versions/ujE6Mlsq/jei-1.20.1-forge-15.20.0.134.jar",
+        "filename": "jei-1.20.1-forge-15.20.0.134.jar",
+        "primary": true,
+        "size": 1412399,
+        "file_type": null
+      }
+    ],
+    "dependencies": []
+  },
+  {
+    "game_versions": [
+      "1.20.1"
+    ],
+    "loaders": [
+      "forge"
+    ],
+    "id": "vnxhddW4",
+    "project_id": "u6dRKJwZ",
+    "author_id": "nMXRSbhF",
+    "featured": false,
+    "name": "15.20.0.133 for Forge 1.20.1",
+    "version_number": "15.20.0.133",
+    "changelog": "  * [Specify Java 17 for the gradle toolchain](https://github.com/mezz/JustEnoughItems/commit/8814ef301e3dc5d6c748ce7c28d035c50db99113) - mezz\n",
+    "changelog_url": null,
+    "date_published": "2026-07-04T06:51:56.666594Z",
+    "downloads": 245312,
+    "version_type": "beta",
+    "status": "listed",
+    "requested_status": null,
+    "files": [
+      {
+        "id": "JFWJDxXJ",
+        "hashes": {
+          "sha1": "c23406dbad87f9a7563c97ff3d5195311ab0fed6",
+          "sha512": "5536d0a414150a078a5b4ae7e0d2b660fcee63b968a56cec1bcac5887cb352cd3d734e714f51778554d6c46cb0cf72555b41dea34d8649f90d71e94ddbf1e471"
+        },
+        "url": "https://cdn.modrinth.com/data/u6dRKJwZ/versions/vnxhddW4/jei-1.20.1-forge-15.20.0.133.jar",
+        "filename": "jei-1.20.1-forge-15.20.0.133.jar",
+        "primary": true,
+        "size": 1409767,
+        "file_type": null
+      }
+    ],
+    "dependencies": []
+  },
+  {
+    "game_versions": [
+      "1.20.1"
+    ],
+    "loaders": [
+      "forge"
+    ],
+    "id": "p5mYHvjx",
+    "project_id": "u6dRKJwZ",
+    "author_id": "nMXRSbhF",
+    "featured": false,
+    "name": "15.20.0.132 for Forge 1.20.1",
+    "version_number": "15.20.0.132",
+    "changelog": "  * [Allow changing recipe category with shift + scroll (#4315)](https://github.com/mezz/JustEnoughItems/commit/0189269cc58ec09e06747fd8f90d07d0f2f00425) - Colter\n  * [Fix 9th slot of the hotbar can not be recognized for Smithing Table recipe transfer (#4330)](https://github.com/mezz/JustEnoughItems/commit/a32de9f9fca935a06b94debe6e12a0313bcf85ae) - qwqmb\n",
+    "changelog_url": null,
+    "date_published": "2026-06-21T09:41:25.124527Z",
+    "downloads": 276301,
+    "version_type": "beta",
+    "status": "listed",
+    "requested_status": null,
+    "files": [
+      {
+        "id": "rgwv4G7B",
+        "hashes": {
+          "sha1": "0da050b53b9904533cfd27039d612d986bc364c7",
+          "sha512": "0e6f0fba35113f8859238e2a097618ff837a5ef4e3953acecac33d5635e3b6c831bf149ceee21f7298087ede200f0f327b183f568f04fa9f5868aef20e90c620"
+        },
+        "url": "https://cdn.modrinth.com/data/u6dRKJwZ/versions/p5mYHvjx/jei-1.20.1-forge-15.20.0.132.jar",
+        "filename": "jei-1.20.1-forge-15.20.0.132.jar",
+        "primary": true,
+        "size": 1409767,
+        "file_type": null
+      }
+    ],
+    "dependencies": []
+  },
+  {
+    "game_versions": [
+      "1.20.1"
+    ],
+    "loaders": [
+      "forge"
+    ],
+    "id": "RTFeXsvE",
+    "project_id": "u6dRKJwZ",
+    "author_id": "nMXRSbhF",
+    "featured": false,
+    "name": "15.20.0.130 for Forge 1.20.1",
+    "version_number": "15.20.0.130",
+    "changelog": "  * [Fix #4130 Recipe keybinds are pressed twice](https://github.com/mezz/JustEnoughItems/commit/46a9b4c65fbe977187f676d82ed48f1a27d96a5b) - mezz\n",
+    "changelog_url": null,
+    "date_published": "2026-04-13T13:50:18.362294Z",
+    "downloads": 1828466,
+    "version_type": "beta",
+    "status": "listed",
+    "requested_status": null,
+    "files": [
+      {
+        "id": "dcDHGWVW",
+        "hashes": {
+          "sha512": "1987d97dfee85090117b3f5572059fcbf242f8dd4b41e2002c21ff271100aaf2ccc2f3ff912fa36a8cfec946c0a55e170d98c8b10347121357c9d428e08f6427",
+          "sha1": "1c51bf6df51ffbb1c5efe23780a7a3d053421f34"
+        },
+        "url": "https://cdn.modrinth.com/data/u6dRKJwZ/versions/RTFeXsvE/jei-1.20.1-forge-15.20.0.130.jar",
+        "filename": "jei-1.20.1-forge-15.20.0.130.jar",
+        "primary": true,
+        "size": 1409705,
+        "file_type": null
+      }
+    ],
+    "dependencies": []
+  },
+  {
+    "game_versions": [
+      "1.20.1"
+    ],
+    "loaders": [
+      "forge"
+    ],
+    "id": "p7yZWpEg",
+    "project_id": "u6dRKJwZ",
+    "author_id": "nMXRSbhF",
+    "featured": false,
+    "name": "15.20.0.129 for Forge 1.20.1",
+    "version_number": "15.20.0.129",
+    "changelog": "  * [Support bookmarking items with different components (#4219)](https://github.com/mezz/JustEnoughItems/commit/165116359b6435778cdca4fad1de362611a11502) - vfyjxf\n",
+    "changelog_url": null,
+    "date_published": "2025-12-29T08:43:05.288383Z",
+    "downloads": 2828184,
+    "version_type": "beta",
+    "status": "listed",
+    "requested_status": null,
+    "files": [
+      {
+        "id": "euMznm1A",
+        "hashes": {
+          "sha1": "eba88424bd28c8bce0e49da13ada71cd47148b47",
+          "sha512": "280dff664abf3c04ecdf9e13a49619a25b7ba1c1f9d0f5c47394a4f9f71dc96628cf2e73de2143b75a16955e820de11dd87e06a6902088f2fbc4a48da92555a4"
+        },
+        "url": "https://cdn.modrinth.com/data/u6dRKJwZ/versions/p7yZWpEg/jei-1.20.1-forge-15.20.0.129.jar",
+        "filename": "jei-1.20.1-forge-15.20.0.129.jar",
+        "primary": true,
+        "size": 1409642,
+        "file_type": null
+      }
+    ],
+    "dependencies": []
+  }
+]
