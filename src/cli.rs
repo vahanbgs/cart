@@ -1,3 +1,4 @@
+mod add;
 mod build;
 mod disable;
 mod enable;
@@ -6,6 +7,7 @@ mod list;
 mod remove;
 mod run;
 
+pub use add::Add;
 pub use build::Build;
 pub use disable::Disable;
 pub use enable::Enable;
@@ -53,6 +55,7 @@ pub enum Subcommands {
     Build(Build),
     Run(Run),
     List(List),
+    Add(Add),
     Remove(Remove),
     Disable(Disable),
     Enable(Enable),

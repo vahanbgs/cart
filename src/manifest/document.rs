@@ -2,7 +2,8 @@ use std::path::Path;
 
 use anyhow::{Context, anyhow, bail};
 use tokio::fs;
-use toml_edit::{DocumentMut, Item, Table, Value, value};
+use toml_edit::{DocumentMut, InlineTable, Item, Table, Value, value};
+use url::Url;
 
 /// Parse `cart.toml` into a `DocumentMut` that preserves comments, blank
 /// lines, and key ordering — so future write commands can mutate one entry
@@ -19,6 +20,31 @@ pub async fn save_document(path: &Path, document: &DocumentMut) -> anyhow::Resul
     fs::write(path, document.to_string())
         .await
         .with_context(|| format!("failed to write manifest at {}", path.display()))
+}
+
+/// Add `[mods].<name> = { url = "…" }` to the document. Errors if the key
+/// already exists — overwrite would silently discard a user-configured
+/// entry.
+pub fn add_mod(
+    document: &mut DocumentMut,
+    name: &str,
+    url: &Url,
+    disabled: bool,
+) -> anyhow::Result<()> {
+    let mods = mods_table_mut_or_create(document);
+    if mods.contains_key(name) {
+        bail!("mod already declared in [mods]: {name}");
+    }
+
+    let mut inline = InlineTable::new();
+    inline.insert("url", Value::from(url.as_str()));
+    if disabled {
+        inline.insert("disabled", Value::from(true));
+    }
+    inline.fmt();
+    mods.insert(name, Item::Value(Value::InlineTable(inline)));
+
+    Ok(())
 }
 
 /// Remove `[mods].<name>` from the document. Errors if `[mods]` is absent
@@ -78,6 +104,17 @@ fn mods_table_mut(document: &mut DocumentMut) -> anyhow::Result<&mut Table> {
         .get_mut("mods")
         .and_then(Item::as_table_mut)
         .ok_or_else(|| anyhow!("[mods] table missing from cart.toml"))
+}
+
+fn mods_table_mut_or_create(document: &mut DocumentMut) -> &mut Table {
+    if !document.contains_key("mods") {
+        let mut table = Table::new();
+        table.set_implicit(false);
+        document.insert("mods", Item::Table(table));
+    }
+    document["mods"]
+        .as_table_mut()
+        .expect("[mods] just inserted as a table")
 }
 
 #[cfg(test)]

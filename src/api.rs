@@ -1,4 +1,5 @@
 pub mod forge;
+pub mod modrinth;
 pub mod piston;
 
 use url::Url;

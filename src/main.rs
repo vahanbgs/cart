@@ -41,6 +41,9 @@ async fn main() -> anyhow::Result<()> {
         Subcommands::List(list) => {
             list.run(&cli).await?;
         }
+        Subcommands::Add(add) => {
+            add.run(&cli).await?;
+        }
         Subcommands::Remove(remove) => {
             remove.run(&cli).await?;
         }

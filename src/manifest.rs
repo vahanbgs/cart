@@ -1,7 +1,7 @@
 mod document;
 mod mod_dependency;
 
-pub use document::{load_document, remove_mod, save_document, set_mod_disabled};
+pub use document::{add_mod, load_document, remove_mod, save_document, set_mod_disabled};
 pub use mod_dependency::ModDependency;
 
 use std::{
