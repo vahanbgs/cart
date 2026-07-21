@@ -85,6 +85,12 @@ async fn resolve_url(
             .await?;
             Ok(resolved.file.url)
         }
+        // Wired up in a follow-up commit — until then a CurseForge
+        // entry in cart.toml fails the build loudly rather than
+        // silently skipping.
+        ModDependency::CurseForge { .. } => {
+            anyhow::bail!("CurseForge mod fetch not yet implemented")
+        }
     }
 }
 

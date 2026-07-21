@@ -57,6 +57,10 @@ impl Update {
                     tracing::debug!("{name}: url entry, skipped");
                     continue;
                 }
+                ModDependency::CurseForge { .. } => {
+                    tracing::debug!("{name}: curseforge entry, update not yet implemented");
+                    continue;
+                }
             };
 
             // Per-entry errors (Modrinth 5xx, project renamed, no compatible

@@ -48,20 +48,23 @@ impl List {
 fn source_label(dep: &ModDependency) -> &'static str {
     match dep {
         ModDependency::Modrinth { .. } => "modrinth",
+        ModDependency::CurseForge { .. } => "curseforge",
         ModDependency::Url { .. } => "url",
     }
 }
 
 /// Text for the version column. Modrinth entries show their pinned
 /// `version_number`, or `(unpinned)` if loose — hinting that the actual
-/// version is decided at build time. URL entries have no meaningful
-/// version to show (the URL is the pin).
+/// version is decided at build time. CurseForge entries always pin a
+/// numeric file id. URL entries have no meaningful version to show
+/// (the URL is the pin).
 fn version_label(dep: &ModDependency) -> String {
     match dep {
         ModDependency::Modrinth {
             version: Some(v), ..
         } => v.clone(),
         ModDependency::Modrinth { version: None, .. } => String::from("(unpinned)"),
+        ModDependency::CurseForge { file, .. } => file.to_string(),
         ModDependency::Url { .. } => String::new(),
     }
 }

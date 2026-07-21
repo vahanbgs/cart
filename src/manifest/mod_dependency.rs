@@ -14,6 +14,16 @@ pub enum ModDependency {
         #[serde(default)]
         disabled: bool,
     },
+    /// Sourced from CurseForge by numeric project + file id. Unlike
+    /// Modrinth we don't store the slug — CurseForge slugs can rename
+    /// but the ids are permanent, so `cart add` resolves the slug at
+    /// add-time and pins ids into the manifest.
+    CurseForge {
+        curseforge: u32,
+        file: u32,
+        #[serde(default)]
+        disabled: bool,
+    },
     /// Raw URL — the escape hatch for anything not on Modrinth. Fully
     /// pinned by the URL; `cart update` skips these entries.
     Url {
@@ -26,7 +36,9 @@ pub enum ModDependency {
 impl ModDependency {
     pub fn is_disabled(&self) -> bool {
         match self {
-            Self::Modrinth { disabled, .. } | Self::Url { disabled, .. } => *disabled,
+            Self::Modrinth { disabled, .. }
+            | Self::CurseForge { disabled, .. }
+            | Self::Url { disabled, .. } => *disabled,
         }
     }
 
@@ -108,5 +120,38 @@ mod tests {
     fn ambiguous_entry_resolves_to_modrinth() {
         let dep = parse(r#"{ modrinth = "jei", url = "https://example.com/x.jar" }"#);
         assert!(matches!(dep, ModDependency::Modrinth { .. }));
+    }
+
+    #[test]
+    fn curseforge_entry() {
+        let ModDependency::CurseForge {
+            curseforge,
+            file,
+            disabled,
+        } = parse(r#"{ curseforge = 238222, file = 8419086 }"#)
+        else {
+            panic!("expected CurseForge variant");
+        };
+        assert_eq!(curseforge, 238222);
+        assert_eq!(file, 8419086);
+        assert!(!disabled);
+    }
+
+    #[test]
+    fn curseforge_disabled() {
+        let ModDependency::CurseForge { disabled, .. } =
+            parse(r#"{ curseforge = 238222, file = 8419086, disabled = true }"#)
+        else {
+            panic!("expected CurseForge variant");
+        };
+        assert!(disabled);
+    }
+
+    #[test]
+    fn curseforge_filename() {
+        let dep = parse(r#"{ curseforge = 238222, file = 8419086 }"#);
+        assert_eq!(dep.filename("jei"), "jei.jar");
+        let dep = parse(r#"{ curseforge = 238222, file = 8419086, disabled = true }"#);
+        assert_eq!(dep.filename("jei"), "jei.jar.disabled");
     }
 }
