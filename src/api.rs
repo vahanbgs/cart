@@ -1,3 +1,4 @@
+pub mod curseforge;
 pub mod forge;
 pub mod modrinth;
 pub mod piston;
