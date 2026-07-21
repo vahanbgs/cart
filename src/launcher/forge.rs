@@ -55,10 +55,20 @@ pub async fn install(
         .join(forge_version)
         .join(".installed");
 
-    // Any library in install_profile.libraries with an empty URL is bundled
-    // inside the installer under maven/{artifact.path}. Extract those to the
-    // Forge Maven cache path so build_class_path can find them by URL.
-    for lib in &install_profile.libraries {
+    // Any library with an empty URL is bundled inside the installer
+    // under maven/{artifact.path}. Extract those to the Forge Maven
+    // cache path so build_class_path can find them by URL.
+    //
+    // Walks BOTH install_profile.libraries (needed by the processor
+    // pipeline) AND version.json's libraries (needed on the launch
+    // classpath) — 1.16.5 has an embedded `forge-<ver>.jar` in the
+    // version.json list only, and skipping it made build_class_path
+    // 404 upstream where no unclassified forge jar is published.
+    for lib in install_profile
+        .libraries
+        .iter()
+        .chain(forge_version_manifest.libraries.iter())
+    {
         if let Some(artifact) = &lib.downloads.artifact {
             if artifact.url.is_none() {
                 let entry_name = format!("maven/{}", artifact.path.display());
@@ -220,8 +230,20 @@ fn resolve_data_value(
     }
 
     if let Some(inner_path) = value.strip_prefix('/') {
-        // File embedded inside the installer JAR.
-        let target = local_dir.join("installer-data").join(inner_path);
+        // File embedded inside the installer JAR. Scope the extraction
+        // path by the installer's filename stem so multiple Forge
+        // versions (e.g. 1.16.5-36.2.42 and 1.20.1-47.4.21) don't
+        // collide on a shared `/data/client.lzma` path — otherwise the
+        // first install's binpatch gets fed to every subsequent install
+        // whose data value happens to name the same inner path.
+        let installer_key = installer_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown-installer");
+        let target = local_dir
+            .join("installer-data")
+            .join(installer_key)
+            .join(inner_path);
         if !target.exists() {
             extract_from_installer(installer_path, inner_path, &target)?;
         }
