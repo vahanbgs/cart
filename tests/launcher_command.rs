@@ -271,3 +271,55 @@ async fn build_command_1_6_4_vanilla_has_expected_shape() {
     assert!(args.iter().any(|a| a == "-Xmx4G"), "missing -Xmx4G");
     assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
 }
+
+/// 1.2.5 is pre-1.6 — its manifest's `mainClass` is the launchwrapper
+/// indirection (`net.minecraft.launchwrapper.Launch`), its args
+/// reference `${auth_session}` (combined session token) instead of the
+/// split `--accessToken`/`--uuid` form, and `--assetsDir` points at
+/// `${game_assets}` — a name-based asset directory rather than the
+/// modern hash-based `${assets_root}` layout. This test locks in that
+/// all three templates get resolved by `build_command`.
+#[tokio::test]
+#[ignore = "warms the shared cart cache on first run"]
+async fn build_command_1_2_5_vanilla_has_expected_shape() {
+    let game_dir = tempfile::tempdir().unwrap();
+    let instance = Instance::builder()
+        .version("1.2.5")
+        .build(game_dir.path().to_path_buf());
+
+    let launcher = Launcher::new();
+    let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
+
+    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let args: Vec<String> = command
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+
+    assert!(
+        program.contains("java"),
+        "expected bundled java runtime, got: {program}"
+    );
+    assert!(
+        args.iter().any(|a| a == "net.minecraft.launchwrapper.Launch"),
+        "expected launchwrapper main class in args:\n{args:#?}"
+    );
+
+    for var in [
+        "${classpath}",
+        "${natives_directory}",
+        "${game_directory}",
+        "${auth_session}",
+        "${game_assets}",
+    ] {
+        let leaked: Vec<&String> = args.iter().filter(|a| a.contains(var)).collect();
+        assert!(
+            leaked.is_empty(),
+            "critical template {var} left unresolved in: {leaked:#?}"
+        );
+    }
+
+    assert!(args.iter().any(|a| a == "-Xmx4G"), "missing -Xmx4G");
+    assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
+}

@@ -156,6 +156,28 @@ impl Launcher {
                 asset_directory.to_string_lossy().into_owned(),
             ),
             ("assets_index_name", asset_index.id.clone()),
+            // Pre-1.6 versions use the combined `${auth_session}` token
+            // (`token:<accessToken>:<uuid>`) instead of the split
+            // `--accessToken`/`--uuid` args. Offline launchers use a
+            // zero-padded stub — MC only logs it and uses it for network
+            // calls that offline auth skips anyway.
+            (
+                "auth_session",
+                "token:0:00000000-0000-0000-0000-000000000000".to_owned(),
+            ),
+            // Pre-1.6's `--assetsDir ${game_assets}` points at a
+            // name-based (not hash-based) asset directory. We advertise
+            // the well-known `assets/virtual/<index>` path here so tier-A
+            // stops seeing an unresolved template; actually materializing
+            // the assets in that directory is the tier-B follow-up.
+            (
+                "game_assets",
+                asset_directory
+                    .join("virtual")
+                    .join(&asset_index.id)
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
             (
                 "auth_uuid",
                 "00000000-0000-0000-0000-000000000000".to_owned(),
