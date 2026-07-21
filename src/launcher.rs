@@ -161,6 +161,12 @@ impl Launcher {
                 "00000000-0000-0000-0000-000000000000".to_owned(),
             ),
             ("auth_access_token", "0".to_owned()),
+            // Pre-1.13 versions pass `--userProperties ${user_properties}`
+            // through to `Main.main`, which parses it as JSON via Gson.
+            // An unresolved template makes it crash with
+            // "Expected BEGIN_OBJECT but was STRING at line 1 column 1".
+            // Modern launchers use `{}` for offline auth.
+            ("user_properties", "{}".to_owned()),
             ("user_type", "legacy".to_owned()),
             ("version_type", version.kind.as_ref().to_owned()),
             (
