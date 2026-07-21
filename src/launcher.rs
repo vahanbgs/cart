@@ -26,6 +26,12 @@ pub struct Launcher {
     cache: Cache,
 }
 
+impl Default for Launcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Launcher {
     pub fn new() -> Self {
         let project_dirs =

@@ -78,11 +78,10 @@ impl Cache {
 
         let computed_digest = Sha1Digest::from_bytes(hasher.finalize().into());
 
-        if let Some(expected_digest) = expected_digest {
-            if *expected_digest != computed_digest {
+        if let Some(expected_digest) = expected_digest
+            && *expected_digest != computed_digest {
                 bail!("SHA-1 digest mismatch while fetching '{}'", url);
             }
-        }
 
         Ok(path)
     }

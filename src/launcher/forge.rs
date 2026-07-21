@@ -69,8 +69,8 @@ pub async fn install(
         .iter()
         .chain(forge_version_manifest.libraries.iter())
     {
-        if let Some(artifact) = &lib.downloads.artifact {
-            if artifact.url.is_none() {
+        if let Some(artifact) = &lib.downloads.artifact
+            && artifact.url.is_none() {
                 let entry_name = format!("maven/{}", artifact.path.display());
                 let jar_url = FORGE_MAVEN_URL
                     .join(&artifact.path.to_string_lossy())
@@ -82,7 +82,6 @@ pub async fn install(
                     extract_from_installer(&installer_path, &entry_name, &cache_path)?;
                 }
             }
-        }
     }
 
     // Legacy Forge (no processors): no client JAR patching needed.
@@ -287,11 +286,10 @@ async fn run_processors(
 ) -> anyhow::Result<()> {
     for processor in processors {
         // Only run client-side processors.
-        if let Some(sides) = &processor.sides {
-            if !sides.iter().any(|s| s == "client") {
+        if let Some(sides) = &processor.sides
+            && !sides.iter().any(|s| s == "client") {
                 continue;
             }
-        }
 
         let proc_jar = lib_paths
             .get(&processor.jar)

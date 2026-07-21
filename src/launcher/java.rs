@@ -68,28 +68,25 @@ pub async fn fetch_java_distribution(
         .join(java_version_component.as_ref());
 
     for (path, fs_entry) in java_distribution.files {
-        match fs_entry {
-            FileSystemEntry::File {
+        if let FileSystemEntry::File {
                 downloads,
                 executable,
-            } => {
-                let source_path = cache
-                    .fetch(&downloads.raw.url, Some(&downloads.raw.sha1))
-                    .await?;
+            } = fs_entry {
+            let source_path = cache
+                .fetch(&downloads.raw.url, Some(&downloads.raw.sha1))
+                .await?;
 
-                let target_path = java_distribution_path.join(path);
+            let target_path = java_distribution_path.join(path);
 
-                fs::create_dir_all(target_path.parent().unwrap()).await?;
+            fs::create_dir_all(target_path.parent().unwrap()).await?;
 
-                if !fs::try_exists(&target_path).await? {
-                    fs::hard_link(source_path, &target_path).await?;
-                }
-
-                if executable {
-                    make_executable(target_path).await?;
-                }
+            if !fs::try_exists(&target_path).await? {
+                fs::hard_link(source_path, &target_path).await?;
             }
-            _ => {}
+
+            if executable {
+                make_executable(target_path).await?;
+            }
         }
     }
 
@@ -143,7 +140,7 @@ pub async fn build_class_path(
                     }
                 }
 
-                rule_applies &= matches!(rule.features, None);
+                rule_applies &= rule.features.is_none();
 
                 if rule_applies {
                     allow = rule.action == Action::Allow;
@@ -155,8 +152,8 @@ pub async fn build_class_path(
             continue;
         }
 
-        if let Some(artifact) = &library_entry.downloads.artifact {
-            if let Some(url) = &artifact.url {
+        if let Some(artifact) = &library_entry.downloads.artifact
+            && let Some(url) = &artifact.url {
                 let path = cache.fetch(url, Some(&artifact.sha1)).await?;
                 add_classpath_entry(
                     &mut entries,
@@ -165,19 +162,16 @@ pub async fn build_class_path(
                     path.to_string_lossy().into_owned(),
                 );
             }
-        }
 
-        if let Some(native) = &library_entry.downloads.classifiers {
-            if let Some(native) = native.get(&NativeClassifier::current()) {
-                if let Some(url) = &native.url {
+        if let Some(native) = &library_entry.downloads.classifiers
+            && let Some(native) = native.get(&NativeClassifier::current())
+                && let Some(url) = &native.url {
                     let jar_path = cache.fetch(url, Some(&native.sha1)).await?;
                     let jar_file = File::open(jar_path).await?;
                     let mut archive = ZipArchive::new(jar_file.into_std().await)?;
 
                     archive.extract(natives_directory)?;
                 }
-            }
-        }
     }
 
     for lib in extra_libraries {

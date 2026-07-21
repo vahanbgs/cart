@@ -113,7 +113,7 @@ pub struct JavaDistribution {
 pub enum FileSystemEntry {
     Directory,
     File {
-        downloads: JavaDownloadOptions,
+        downloads: Box<JavaDownloadOptions>,
         executable: bool,
     },
     Link {
