@@ -1,13 +1,12 @@
 use std::path::Path;
 
-use anyhow::Context;
+use anyhow::{Context, anyhow, bail};
 use tokio::fs;
-use toml_edit::DocumentMut;
+use toml_edit::{DocumentMut, Item, Table, Value, value};
 
 /// Parse `cart.toml` into a `DocumentMut` that preserves comments, blank
 /// lines, and key ordering — so future write commands can mutate one entry
 /// without reformatting the whole file.
-#[allow(dead_code)] // wired up by the upcoming add/remove/disable commands
 pub async fn load_document(path: &Path) -> anyhow::Result<DocumentMut> {
     let text = fs::read_to_string(path)
         .await
@@ -20,6 +19,65 @@ pub async fn save_document(path: &Path, document: &DocumentMut) -> anyhow::Resul
     fs::write(path, document.to_string())
         .await
         .with_context(|| format!("failed to write manifest at {}", path.display()))
+}
+
+/// Remove `[mods].<name>` from the document. Errors if `[mods]` is absent
+/// or the entry doesn't exist — silently succeeding on a typo would be a
+/// footgun.
+pub fn remove_mod(document: &mut DocumentMut, name: &str) -> anyhow::Result<()> {
+    let mods = mods_table_mut(document)?;
+    if mods.remove(name).is_none() {
+        bail!("mod not found in [mods]: {name}");
+    }
+    Ok(())
+}
+
+/// Toggle the `disabled` field on `[mods].<name>`. Idempotent: setting to
+/// the current state is a no-op. Enabling removes the key entirely rather
+/// than writing `disabled = false`, since `false` is the default and
+/// omitting it keeps the manifest cleaner.
+pub fn set_mod_disabled(
+    document: &mut DocumentMut,
+    name: &str,
+    disabled: bool,
+) -> anyhow::Result<()> {
+    let mods = mods_table_mut(document)?;
+    let entry = mods
+        .get_mut(name)
+        .ok_or_else(|| anyhow!("mod not found in [mods]: {name}"))?;
+
+    // A mod entry can be either an inline table (`jei = { url = "..." }`)
+    // or a subtable (`[mods.jei]\nurl = "..."`); both are valid TOML and
+    // deserialize into the same `ModDependency`.
+    match entry {
+        Item::Value(Value::InlineTable(inline)) => {
+            if disabled {
+                inline.insert("disabled", Value::from(true));
+                // Normalise separator whitespace — otherwise the previously
+                // last value's trailing space bleeds in front of the
+                // inserted comma (`"url" , disabled = true`).
+                inline.fmt();
+            } else {
+                inline.remove("disabled");
+            }
+        }
+        Item::Table(table) => {
+            if disabled {
+                table.insert("disabled", value(true));
+            } else {
+                table.remove("disabled");
+            }
+        }
+        _ => bail!("[mods].{name} is not a table"),
+    }
+    Ok(())
+}
+
+fn mods_table_mut(document: &mut DocumentMut) -> anyhow::Result<&mut Table> {
+    document
+        .get_mut("mods")
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| anyhow!("[mods] table missing from cart.toml"))
 }
 
 #[cfg(test)]

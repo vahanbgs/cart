@@ -1,8 +1,7 @@
 mod document;
 mod mod_dependency;
 
-#[allow(unused_imports)] // load_document is used by the upcoming add/remove/disable commands
-pub use document::{load_document, save_document};
+pub use document::{load_document, remove_mod, save_document, set_mod_disabled};
 pub use mod_dependency::ModDependency;
 
 use std::{

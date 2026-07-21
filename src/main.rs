@@ -41,6 +41,15 @@ async fn main() -> anyhow::Result<()> {
         Subcommands::List(list) => {
             list.run(&cli).await?;
         }
+        Subcommands::Remove(remove) => {
+            remove.run(&cli).await?;
+        }
+        Subcommands::Disable(disable) => {
+            disable.run(&cli).await?;
+        }
+        Subcommands::Enable(enable) => {
+            enable.run(&cli).await?;
+        }
     }
 
     Ok(())
