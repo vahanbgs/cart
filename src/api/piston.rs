@@ -152,3 +152,38 @@ pub struct LibraryEntry {
     /// Legacy Forge field; `Some(false)` means server-only, skip on client.
     pub clientreq: Option<bool>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The whole point of platform-tagged classifiers is that we pick one
+    /// automatically. This is the self-consistency test — if any future
+    /// arch is added but the cfg branches in `current()` aren't updated,
+    /// this catches it on that arch.
+    #[test]
+    fn native_classifier_current_matches_current_platform() {
+        assert!(NativeClassifier::current().matches_current_platform());
+    }
+
+    /// Same guarantee for the shorter `OsName` — used in library `natives`
+    /// maps to pick which classifier to extract.
+    #[test]
+    fn each_os_name_matches_exactly_one_platform() {
+        let matches: Vec<_> = [OsName::Linux, OsName::Osx, OsName::Windows]
+            .into_iter()
+            .filter(|os| os.matches_current_platform())
+            .collect();
+        assert_eq!(matches.len(), 1, "expected exactly one OsName to match");
+    }
+
+    /// Modern manifests use `natives-osx` on some libraries and
+    /// `natives-macos` on others; both must map to the same enum value.
+    #[test]
+    fn native_classifier_accepts_osx_alias() {
+        let osx: NativeClassifier = serde_json::from_str("\"natives-osx\"").unwrap();
+        let macos: NativeClassifier = serde_json::from_str("\"natives-macos\"").unwrap();
+        assert_eq!(osx, NativeClassifier::NativesMacos);
+        assert_eq!(macos, NativeClassifier::NativesMacos);
+    }
+}

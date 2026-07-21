@@ -99,3 +99,50 @@ impl Cache {
         Ok(self.path.join(host.to_string()).join(url_path))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use reqwest::Client;
+    use url::Url;
+
+    use super::Cache;
+
+    fn cache() -> Cache {
+        Cache::new(PathBuf::from("/cache"), Client::new())
+    }
+
+    #[test]
+    fn path_from_url_maps_host_and_path() {
+        let url = Url::parse("https://piston-data.mojang.com/v1/objects/abc/client.jar").unwrap();
+        let path = cache().path_from_url(&url).unwrap();
+        assert_eq!(
+            path,
+            PathBuf::from("/cache/piston-data.mojang.com/v1/objects/abc/client.jar"),
+        );
+    }
+
+    /// `url.path()` strips the query string, so two URLs differing only in
+    /// query would collide in the cache. Piston/Modrinth CDNs don't use
+    /// query strings for content addresses today; if that ever changes,
+    /// this test forces the discussion.
+    #[test]
+    fn path_from_url_ignores_query_string() {
+        let bare = Url::parse("https://example.com/a/b.jar").unwrap();
+        let with_query = Url::parse("https://example.com/a/b.jar?token=xyz").unwrap();
+        assert_eq!(
+            cache().path_from_url(&bare).unwrap(),
+            cache().path_from_url(&with_query).unwrap(),
+        );
+    }
+
+    /// Opaque URLs (`data:`, `file:` on some platforms) have no host tuple.
+    /// We rely on this to reject nonsense inputs before creating a cache
+    /// directory named after the empty string.
+    #[test]
+    fn path_from_url_rejects_opaque_origin() {
+        let url = Url::parse("data:text/plain,hello").unwrap();
+        assert!(cache().path_from_url(&url).is_err());
+    }
+}
