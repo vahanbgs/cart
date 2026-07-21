@@ -1,9 +1,11 @@
 mod build;
 mod init;
+mod list;
 mod run;
 
 pub use build::Build;
 pub use init::Init;
+pub use list::List;
 pub use run::Run;
 
 use std::path::PathBuf;
@@ -44,4 +46,5 @@ pub enum Subcommands {
     Init(Init),
     Build(Build),
     Run(Run),
+    List(List),
 }
