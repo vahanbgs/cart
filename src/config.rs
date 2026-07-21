@@ -15,6 +15,12 @@ impl<'cli> Config<'cli> {
             None => Manifest::locate().await?,
         };
 
+        // Absolutize: downstream code passes the game directory to Java via
+        // `--gameDir`, and Java runs with cwd inside that directory, so any
+        // relative path resolves against itself and points into a phantom
+        // nested tree.
+        let manifest_directory = std::path::absolute(manifest_directory)?;
+
         let manifest = Manifest::load_from_path(&manifest_path).await?;
 
         Ok(Self {
