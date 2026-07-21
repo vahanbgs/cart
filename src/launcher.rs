@@ -81,6 +81,7 @@ impl Launcher {
         let natives_directory = tempfile::tempdir()?;
 
         // ── Forge ────────────────────────────────────────────────────────────
+        let mut resolved_forge_version: Option<String> = None;
         let (client_jar, forge_extra_libraries, forge_main_class, forge_game_args, forge_jvm_args) =
             if let Some(forge_spec) = instance.forge_spec() {
                 let forge_version = if matches!(forge_spec, "latest" | "recommended") {
@@ -109,6 +110,8 @@ impl Launcher {
                 let client_jar = result
                     .patched_client_jar
                     .unwrap_or_else(|| vanilla_client_jar.clone());
+
+                resolved_forge_version = Some(forge_version);
 
                 (
                     client_jar,
@@ -217,7 +220,19 @@ impl Launcher {
             }
         }
 
-        command.status().await?;
+        match &resolved_forge_version {
+            Some(fv) => tracing::info!("launching minecraft {} with forge {fv}", version.id),
+            None => tracing::info!("launching minecraft {}", version.id),
+        }
+
+        let status = command.status().await?;
+        if !status.success() {
+            let log_path = instance.directory().join("logs").join("latest.log");
+            tracing::warn!(
+                "minecraft exited with {status}; see {}",
+                log_path.display()
+            );
+        }
 
         Ok(())
     }

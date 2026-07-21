@@ -17,6 +17,11 @@ pub struct Cli {
     #[arg(short = 'C', long = "directory", value_name = "DIR", global = true)]
     pub directory: Option<PathBuf>,
 
+    /// Increase log verbosity: default = info, `-v` = debug, `-vv` = trace.
+    /// `RUST_LOG` overrides both if set.
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
+    pub verbose: u8,
+
     #[arg(long = "mv")]
     pub minecraft_version: Option<String>,
 

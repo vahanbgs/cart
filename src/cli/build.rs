@@ -81,7 +81,14 @@ async fn sync_mods(
 
     for (mod_name, mod_source) in &config.manifest().mods {
         let source_path = match mod_source {
-            ModDependency::Url { url, .. } => cache.fetch_mod(url).await?,
+            ModDependency::Url { url, .. } => {
+                let cached = tokio::fs::try_exists(cache.path_from_url(url)?).await?;
+                tracing::info!(
+                    "{action} {mod_name}",
+                    action = if cached { "cached  " } else { "download" },
+                );
+                cache.fetch_mod(url).await?
+            }
         };
 
         let target_path = mods_directory.join(mod_source.filename(mod_name));
