@@ -40,6 +40,32 @@ async fn assert_launches_cleanly(version: &str, watch: Duration) {
     let instance = Instance::builder()
         .version(version)
         .build(game_dir.path().to_path_buf());
+    spawn_and_watch(instance, game_dir, version, watch).await;
+}
+
+/// Forge variant of `assert_launches_cleanly`. Kept separate so the
+/// existing vanilla callsites don't need to grow an `Option<&str>`
+/// argument — inline duplication is fine while the shape settles.
+async fn assert_launches_with_forge_cleanly(
+    version: &str,
+    forge_spec: &str,
+    watch: Duration,
+) {
+    let game_dir = tempfile::tempdir().unwrap();
+    let instance = Instance::builder()
+        .version(version)
+        .forge_spec(forge_spec)
+        .build(game_dir.path().to_path_buf());
+    let label = format!("{version}+forge:{forge_spec}");
+    spawn_and_watch(instance, game_dir, &label, watch).await;
+}
+
+async fn spawn_and_watch(
+    instance: Instance,
+    game_dir: tempfile::TempDir,
+    label: &str,
+    watch: Duration,
+) {
     let launcher = Launcher::new();
     let (mut command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
@@ -54,7 +80,7 @@ async fn assert_launches_cleanly(version: &str, watch: Duration) {
             let status = result.expect("wait on child");
             let log_tail = read_log_tail(game_dir.path()).await;
             panic!(
-                "{version}: minecraft exited within {watch:?}: {status}\n\
+                "{label}: minecraft exited within {watch:?}: {status}\n\
                  --- logs/latest.log tail ---\n{log_tail}"
             );
         }
@@ -107,4 +133,10 @@ async fn launches_1_2_5_vanilla() {
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_b1_7_vanilla() {
     assert_launches_cleanly("b1.7", Duration::from_secs(15)).await;
+}
+
+#[tokio::test]
+#[ignore = "spawns Minecraft — needs a display (see file header)"]
+async fn launches_1_12_2_forge_recommended() {
+    assert_launches_with_forge_cleanly("1.12.2", "recommended", Duration::from_secs(15)).await;
 }
