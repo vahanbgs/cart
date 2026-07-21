@@ -1,5 +1,8 @@
+mod document;
 mod mod_dependency;
 
+#[allow(unused_imports)] // load_document is used by the upcoming add/remove/disable commands
+pub use document::{load_document, save_document};
 pub use mod_dependency::ModDependency;
 
 use std::{
@@ -9,12 +12,10 @@ use std::{
 };
 
 use anyhow::bail;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::fs;
 
-use crate::Cli;
-
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 pub struct Manifest {
     pub minecraft: String,
     pub forge: Option<String>,
@@ -22,18 +23,6 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    pub fn new(cli: &Cli) -> Self {
-        Self {
-            minecraft: cli
-                .minecraft_version
-                .as_deref()
-                .unwrap_or("latest")
-                .to_owned(),
-            forge: None,
-            mods: Default::default(),
-        }
-    }
-
     pub async fn locate() -> anyhow::Result<(PathBuf, PathBuf)> {
         let mut current_directory = env::current_dir()?;
 

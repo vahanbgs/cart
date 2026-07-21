@@ -1,13 +1,13 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use url::Url;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum ModDependency {
     Url {
         url: Url,
         /// Place the mod as `<name>.jar.disabled` so Forge/Fabric skips it.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[serde(default)]
         disabled: bool,
     },
 }
