@@ -1,4 +1,5 @@
 pub mod curseforge;
+pub mod fabric;
 pub mod forge;
 pub mod modrinth;
 pub mod piston;
