@@ -12,7 +12,10 @@
 //! serialization, so the JSON we emit reads the way a human familiar
 //! with mrpacks expects.
 
-use std::path::{Path, PathBuf};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
@@ -226,6 +229,47 @@ fn pack_file_from(url: &str, jar: &Path, filename: &str) -> anyhow::Result<PackF
         downloads: vec![url.to_owned()],
         file_size: bytes.len() as u64,
     })
+}
+
+/// Serialize `index` as `modrinth.index.json` at the root of `output`
+/// and stream each `overrides[i].1` file into the archive at `overrides[i].0`.
+///
+/// The mrpack format is a plain ZIP; `modrinth.index.json` must sit at
+/// the archive root and every embedded file lives under `overrides/`.
+/// Callers assemble the index + override list (routing per mod happens
+/// in [`build_entry`]); this function only handles serialization and I/O.
+pub fn write_pack(
+    index: &PackIndex,
+    overrides: &[(String, PathBuf)],
+    output: &Path,
+) -> anyhow::Result<()> {
+    let file = std::fs::File::create(output)
+        .with_context(|| format!("create {}", output.display()))?;
+    let mut writer = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    let index_bytes = serde_json::to_vec_pretty(index).context("serialize modrinth.index.json")?;
+    writer
+        .start_file("modrinth.index.json", options)
+        .context("start modrinth.index.json entry")?;
+    writer
+        .write_all(&index_bytes)
+        .context("write modrinth.index.json bytes")?;
+
+    for (dest, source) in overrides {
+        let bytes = std::fs::read(source)
+            .with_context(|| format!("read override source {}", source.display()))?;
+        writer
+            .start_file(dest, options)
+            .with_context(|| format!("start ZIP entry {dest}"))?;
+        writer
+            .write_all(&bytes)
+            .with_context(|| format!("write ZIP entry {dest}"))?;
+    }
+
+    writer.finish().context("finalize mrpack archive")?;
+    Ok(())
 }
 
 fn sha1_hex(bytes: &[u8]) -> String {
@@ -460,6 +504,59 @@ mod tests {
             }
             PackEntry::File(_) => panic!("CF entry should go in overrides"),
         }
+    }
+
+    // ── ZIP writing ───────────────────────────────────────────────────
+
+    /// Round-trip: write a small pack (index + one override), reopen it,
+    /// and assert both members are present with the right bytes. Locks
+    /// in the archive layout — `modrinth.index.json` at the root, every
+    /// other file under the `overrides/` prefix — which is what makes
+    /// the emitted archive an mrpack and not just a random ZIP.
+    #[test]
+    fn write_pack_round_trip() {
+        use std::io::Read;
+
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("config.toml");
+        std::fs::write(&src, b"hello=world\n").unwrap();
+
+        let index = PackIndex {
+            format_version: 1,
+            game: "minecraft".to_owned(),
+            version_id: "0.1.0".to_owned(),
+            name: "round-trip".to_owned(),
+            summary: None,
+            files: vec![],
+            dependencies: dependencies_from("1.20.1", None).unwrap(),
+        };
+        let output = dir.path().join("out.mrpack");
+        let overrides = vec![("overrides/config/config.toml".to_owned(), src.clone())];
+
+        write_pack(&index, &overrides, &output).unwrap();
+
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&output).unwrap()).unwrap();
+
+        // Index round-trips through serde back to an equal PackIndex.
+        let mut index_bytes = Vec::new();
+        archive
+            .by_name("modrinth.index.json")
+            .unwrap()
+            .read_to_end(&mut index_bytes)
+            .unwrap();
+        let round_tripped: PackIndex = serde_json::from_slice(&index_bytes).unwrap();
+        assert_eq!(round_tripped.name, "round-trip");
+        assert_eq!(round_tripped.dependencies.minecraft, "1.20.1");
+        assert!(round_tripped.files.is_empty());
+
+        // Override lands at the exact declared path with unchanged bytes.
+        let mut override_bytes = Vec::new();
+        archive
+            .by_name("overrides/config/config.toml")
+            .unwrap()
+            .read_to_end(&mut override_bytes)
+            .unwrap();
+        assert_eq!(override_bytes, b"hello=world\n");
     }
 
     /// The error must name the mod so the user knows which manifest
