@@ -32,9 +32,7 @@ pub struct Manifest {
     /// Pack authors. Cargo-style plural even when there's one — CF's
     /// `manifest.json` takes a single `author` string, so cart joins
     /// with `, ` at export time when needed.
-    // Only read by the curseforge export module, which lands later.
     #[serde(default)]
-    #[allow(dead_code)]
     pub authors: Vec<String>,
 
     /// Short pack description. Optional in all three export formats.

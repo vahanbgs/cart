@@ -5,4 +5,5 @@
 //! entries to (URL, cached-jar) pairs and hands the format module a
 //! preassembled index + overrides list; the module produces the archive.
 
+pub mod curseforge;
 pub mod mrpack;

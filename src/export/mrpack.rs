@@ -144,19 +144,29 @@ pub enum ModSource {
     CurseForge,
 }
 
-/// One mod after cart's per-source resolution: the source, the filename
-/// to write into the pack, the local cached jar to read for hashing,
-/// and the download URL if there is one. The CLI fills this in from
-/// `manifest.mods` + API lookups; the routing here does no I/O beyond
-/// reading the cached jar.
+/// One mod after cart's per-source resolution. Shared between the mrpack
+/// and curseforge exporters — each format's `build_entry` reads only the
+/// fields it needs.
 pub struct ResolvedMod<'a> {
     pub source: ModSource,
     pub filename: &'a str,
-    pub cached_jar: &'a Path,
+    /// Local cached jar. `Some` whenever the driver called `fetch_mod`.
+    /// `None` in one case: a CurseForge-source entry inside a CurseForge
+    /// export, where the mod ships as a `{projectID, fileID}` reference
+    /// and the jar bytes are never touched.
+    pub cached_jar: Option<&'a Path>,
     /// `Some` for Modrinth (CDN URL) and URL entries. `Some`/`None`
     /// for CurseForge (`None` when the author disabled third-party API
     /// downloads).
     pub download_url: Option<&'a str>,
+    /// The manifest's `disabled = true` bit. mrpack encodes this in the
+    /// `.jar.disabled` filename suffix already; curseforge reads it to
+    /// set `required: false` in `files[]`.
+    pub disabled: bool,
+    /// CurseForge project + file IDs, populated only for
+    /// `ModSource::CurseForge`. The curseforge exporter drops them into
+    /// `files[]` verbatim; mrpack ignores this field.
+    pub curseforge_ids: Option<(u32, u32)>,
 }
 
 /// The routing decision for one mod. Callers pattern-match to either
@@ -188,7 +198,10 @@ pub fn build_entry(m: &ResolvedMod<'_>) -> anyhow::Result<PackEntry> {
                     m.filename
                 )
             })?;
-            let file = pack_file_from(url, m.cached_jar, m.filename)?;
+            let jar = m
+                .cached_jar
+                .with_context(|| format!("mod '{}' has no cached jar", m.filename))?;
+            let file = pack_file_from(url, jar, m.filename)?;
             Ok(PackEntry::File(file))
         }
         ModSource::CurseForge => {
@@ -198,8 +211,11 @@ pub fn build_entry(m: &ResolvedMod<'_>) -> anyhow::Result<PackEntry> {
                  remove it from cart.toml or replace it with the Modrinth equivalent.",
                 m.filename
             ))?;
+            let jar = m
+                .cached_jar
+                .with_context(|| format!("mod '{}' has no cached jar", m.filename))?;
             Ok(PackEntry::Override {
-                source: m.cached_jar.to_owned(),
+                source: jar.to_owned(),
                 dest: format!("overrides/mods/{}", m.filename),
             })
         }
@@ -456,8 +472,10 @@ mod tests {
         let m = ResolvedMod {
             source: ModSource::Modrinth,
             filename: "mod.jar",
-            cached_jar: &jar,
+            cached_jar: Some(&jar),
             download_url: Some("https://cdn.modrinth.com/data/xxx/mod.jar"),
+            disabled: false,
+            curseforge_ids: None,
         };
         match build_entry(&m).unwrap() {
             PackEntry::File(f) => {
@@ -474,8 +492,10 @@ mod tests {
         let m = ResolvedMod {
             source: ModSource::Url,
             filename: "mod.jar",
-            cached_jar: &jar,
+            cached_jar: Some(&jar),
             download_url: Some("https://example.com/mod.jar"),
+            disabled: false,
+            curseforge_ids: None,
         };
         match build_entry(&m).unwrap() {
             PackEntry::File(f) => {
@@ -494,8 +514,10 @@ mod tests {
         let m = ResolvedMod {
             source: ModSource::CurseForge,
             filename: "mod.jar",
-            cached_jar: &jar,
+            cached_jar: Some(&jar),
             download_url: Some("https://mediafilez.forgecdn.net/files/xxx/mod.jar"),
+            disabled: false,
+            curseforge_ids: Some((238222, 8419086)),
         };
         match build_entry(&m).unwrap() {
             PackEntry::Override { source, dest } => {
@@ -568,8 +590,10 @@ mod tests {
         let m = ResolvedMod {
             source: ModSource::CurseForge,
             filename: "picky-mod.jar",
-            cached_jar: &jar,
+            cached_jar: Some(&jar),
             download_url: None,
+            disabled: false,
+            curseforge_ids: Some((238222, 8419086)),
         };
         let err = build_entry(&m).unwrap_err().to_string();
         assert!(err.contains("picky-mod.jar"), "expected filename in error: {err}");

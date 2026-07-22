@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use cart::{
     Launcher,
-    export::mrpack::{
-        self, ModSource, PackEntry, PackFile, PackIndex, ResolvedMod, build_entry,
-        dependencies_from,
+    export::{
+        curseforge::{self, CfFile, CfPackEntry, CurseForgeManifest},
+        mrpack::{
+            self, ModSource, PackEntry, PackFile, PackIndex, ResolvedMod, build_entry,
+            dependencies_from,
+        },
     },
 };
 use clap::{Args, ValueEnum};
@@ -80,13 +83,13 @@ impl Export {
                 Ok(())
             }
             Format::Curseforge => {
-                bail!(
-                    "curseforge export to {} is not yet implemented",
-                    output.display()
-                )
+                let launcher = Launcher::new();
+                run_curseforge(&config, &launcher, &output).await?;
+                tracing::info!("wrote {}", output.display());
+                Ok(())
             }
             Format::Prism => {
-                bail!("prism export to {} is not yet implemented", output.display())
+                anyhow::bail!("prism export to {} is not yet implemented", output.display())
             }
         }
     }
@@ -141,8 +144,10 @@ async fn run_mrpack(
         let resolved = ResolvedMod {
             source: source_of(dep),
             filename: &filename,
-            cached_jar: &cached_jar,
+            cached_jar: Some(&cached_jar),
             download_url: Some(url.as_str()),
+            disabled: dep.is_disabled(),
+            curseforge_ids: None,
         };
         match build_entry(&resolved)? {
             PackEntry::File(f) => files.push(f),
@@ -165,6 +170,92 @@ async fn run_mrpack(
     };
 
     mrpack::write_pack(&index, &overrides, output)
+}
+
+/// Assemble a `CurseForgeManifest` + overrides list from the manifest
+/// and write the CF modpack ZIP. Symmetric to [`run_mrpack`] but with
+/// the routing inverted: CF-sourced mods carry through as
+/// `{projectID, fileID}` refs (no download, no cache touch), while
+/// Modrinth-sourced and URL-sourced mods land under `overrides/mods/`.
+async fn run_curseforge(
+    config: &Config<'_>,
+    launcher: &Launcher,
+    output: &Path,
+) -> anyhow::Result<()> {
+    let manifest = config.manifest();
+    let name = manifest.name.as_deref().expect("name validated by Export::run");
+    let version = manifest
+        .version
+        .as_deref()
+        .expect("version validated by Export::run");
+
+    let minecraft =
+        curseforge::minecraft_block_from(&manifest.minecraft, manifest.loader.as_ref())?;
+
+    let source_directory = config.manifest_directory().join("src");
+    build::reject_src_mods_jars(&source_directory.join("mods")).await?;
+
+    // CF export never calls `resolve_url` on CF-source entries — the
+    // IDs come straight out of the manifest. So no CF-authenticated
+    // client is needed; a plain HTTP client for the Modrinth/URL
+    // branch is enough.
+    let http = Client::new();
+    let cache = launcher.mod_cache();
+
+    let mut files: Vec<CfFile> = Vec::new();
+    let mut overrides: Vec<(String, PathBuf)> = Vec::new();
+
+    let mut mods: Vec<(&String, &ModDependency)> = manifest.mods.iter().collect();
+    mods.sort_by_key(|(name, _)| name.as_str());
+
+    for (mod_name, dep) in mods {
+        let filename = dep.filename(mod_name);
+        let (cached_jar, curseforge_ids): (Option<PathBuf>, Option<(u32, u32)>) = match dep {
+            ModDependency::CurseForge {
+                curseforge: project_id,
+                file: file_id,
+                ..
+            } => {
+                // Skip network + cache entirely — CF's own launcher
+                // will fetch by ID, and doing so here would fail packs
+                // where the author has disabled third-party downloads.
+                (None, Some((*project_id, *file_id)))
+            }
+            _ => {
+                let url = build::resolve_url(dep, manifest, &http, None).await?;
+                (Some(cache.fetch_mod(&url).await?), None)
+            }
+        };
+
+        let resolved = ResolvedMod {
+            source: source_of(dep),
+            filename: &filename,
+            cached_jar: cached_jar.as_deref(),
+            download_url: None,
+            disabled: dep.is_disabled(),
+            curseforge_ids,
+        };
+        match curseforge::build_entry(&resolved)? {
+            CfPackEntry::File(f) => files.push(f),
+            CfPackEntry::Override { source, dest } => overrides.push((dest, source)),
+        }
+    }
+
+    collect_src_overrides(&source_directory, &mut overrides).await?;
+    overrides.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let manifest_out = CurseForgeManifest {
+        minecraft,
+        manifest_type: CurseForgeManifest::MANIFEST_TYPE,
+        manifest_version: 1,
+        name: name.to_owned(),
+        version: version.to_owned(),
+        author: manifest.authors.join(", "),
+        description: manifest.summary.clone().unwrap_or_default(),
+        files,
+        overrides: CurseForgeManifest::OVERRIDES_DIR,
+    };
+    curseforge::write_pack(&manifest_out, &overrides, output)
 }
 
 fn source_of(dep: &ModDependency) -> ModSource {
