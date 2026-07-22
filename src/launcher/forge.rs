@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
+use fs4::fs_std::FileExt;
 use tokio::{fs, process::Command, sync::Mutex};
 use url::Url;
 use zip::ZipArchive;
@@ -87,15 +88,21 @@ pub struct ForgeInstallResult {
     pub effective_version: String,
 }
 
-/// Process-wide lock serializing every Forge-family install. The pipeline
+/// In-process lock serializing every Forge-family install. The pipeline
 /// shells out to Java processors (SpecialSource, installertools, etc.) that
 /// read and write intermediate files keyed by Minecraft version — e.g.
 /// `client-<mc>-slim.jar` — so two concurrent installs for different Forge
 /// versions of the same MC race on those shared paths and one subprocess
-/// exits non-zero. Serializing is the correctness fix; real users typically
-/// run a single `cart build` at a time, so the perf cost is confined to
-/// parallel test suites.
+/// exits non-zero. Paired with a cross-process flock inside `install()` to
+/// also serialize against other `cart` invocations sharing the cache.
 static INSTALL_LOCK: Mutex<()> = Mutex::const_new(());
+
+/// Filename of the per-cache advisory lock used to serialize concurrent
+/// `cart` invocations against the shared Forge install pipeline. One file
+/// serves both Forge and NeoForge — they nominally use different maven
+/// subdirs, but pairing them keeps the lock ordering trivial (a single
+/// `.install.lock` acquire per install, no risk of AB/BA deadlock).
+const INSTALL_LOCK_FILE: &str = ".install.lock";
 
 /// Downloads and runs the Forge-family installer pipeline for `forge_version`
 /// (e.g. `"1.20.1-47.3.12"` for Forge, `"20.4.237"` for NeoForge).  The
@@ -109,6 +116,29 @@ pub async fn install(
     cache: &Cache,
 ) -> anyhow::Result<ForgeInstallResult> {
     let _install_guard = INSTALL_LOCK.lock().await;
+
+    // Cross-process guard against another `cart` invocation racing on the
+    // shared Forge intermediates. Held for the rest of `install()`; the
+    // flock is released when the file handle drops. Advisory only —
+    // non-cart processes ignore it, which is fine because only cart
+    // writes here.
+    let lock_dir = cache.directory().join("forge");
+    fs::create_dir_all(&lock_dir).await?;
+    let lock_path = lock_dir.join(INSTALL_LOCK_FILE);
+    let _cross_process_guard =
+        tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .truncate(false)
+                .open(&lock_path)?;
+            file.lock_exclusive()?;
+            Ok(file)
+        })
+        .await
+        .context("await forge install lock task")?
+        .context("acquire forge install lock")?;
 
     let (effective_version, installer_path) = {
         let candidates = flavor.installer_url_candidates(forge_version);
