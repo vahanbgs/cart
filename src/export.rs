@@ -7,3 +7,4 @@
 
 pub mod curseforge;
 pub mod mrpack;
+pub mod prism;

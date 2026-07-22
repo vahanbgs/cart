@@ -9,6 +9,7 @@ use cart::{
             self, ModSource, PackEntry, PackFile, PackIndex, ResolvedMod, build_entry,
             dependencies_from,
         },
+        prism::{self, PrismPack},
     },
 };
 use clap::{Args, ValueEnum};
@@ -89,7 +90,10 @@ impl Export {
                 Ok(())
             }
             Format::Prism => {
-                anyhow::bail!("prism export to {} is not yet implemented", output.display())
+                let launcher = Launcher::new();
+                run_prism(&config, &launcher, &output).await?;
+                tracing::info!("wrote {}", output.display());
+                Ok(())
             }
         }
     }
@@ -155,7 +159,7 @@ async fn run_mrpack(
         }
     }
 
-    collect_src_overrides(&source_directory, &mut overrides).await?;
+    collect_src_files(&source_directory, "overrides", &mut overrides).await?;
     // Deterministic archive ordering, same reason as the `mods` sort above.
     overrides.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -241,7 +245,7 @@ async fn run_curseforge(
         }
     }
 
-    collect_src_overrides(&source_directory, &mut overrides).await?;
+    collect_src_files(&source_directory, "overrides", &mut overrides).await?;
     overrides.sort_by(|a, b| a.0.cmp(&b.0));
 
     let manifest_out = CurseForgeManifest {
@@ -258,6 +262,57 @@ async fn run_curseforge(
     curseforge::write_pack(&manifest_out, &overrides, output)
 }
 
+/// Assemble a Prism/MultiMC instance ZIP from the manifest. Every mod
+/// is embedded (Prism instances are self-contained), so this driver
+/// fetches every entry — no per-source routing decision like mrpack/CF.
+async fn run_prism(
+    config: &Config<'_>,
+    launcher: &Launcher,
+    output: &Path,
+) -> anyhow::Result<()> {
+    let manifest = config.manifest();
+    let name = manifest.name.as_deref().expect("name validated by Export::run");
+
+    let components = prism::components_from(&manifest.minecraft, manifest.loader.as_ref())?;
+
+    let source_directory = config.manifest_directory().join("src");
+    build::reject_src_mods_jars(&source_directory.join("mods")).await?;
+
+    // Prism embeds every mod. CF entries still go through
+    // `resolve_url` here — needed to get the actual download URL —
+    // which means the CF client is required if any CF entry exists.
+    let http = Client::new();
+    let curseforge_http = build::build_curseforge_client_if_needed(manifest)?;
+    let cache = launcher.mod_cache();
+
+    let mut mods: Vec<(String, PathBuf)> = Vec::new();
+    let mut overrides: Vec<(String, PathBuf)> = Vec::new();
+
+    // Sorted iteration → byte-deterministic archive; see run_mrpack.
+    let mut ordered: Vec<(&String, &ModDependency)> = manifest.mods.iter().collect();
+    ordered.sort_by_key(|(name, _)| name.as_str());
+
+    for (mod_name, dep) in ordered {
+        let url = build::resolve_url(dep, manifest, &http, curseforge_http.as_ref()).await?;
+        let cached_jar = cache.fetch_mod(&url).await?;
+        mods.push((dep.filename(mod_name), cached_jar));
+    }
+
+    // src/ mirrors into `<name>/.minecraft/…`, matching what
+    // `cart build` writes to disk under `minecraft/`.
+    let prefix = format!("{name}/.minecraft");
+    collect_src_files(&source_directory, &prefix, &mut overrides).await?;
+    overrides.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let pack = PrismPack {
+        components,
+        format_version: 1,
+    };
+    let cfg = prism::instance_cfg(name, manifest.summary.as_deref());
+
+    prism::write_pack(name, &pack, &cfg, &mods, &overrides, output)
+}
+
 fn source_of(dep: &ModDependency) -> ModSource {
     match dep {
         ModDependency::Modrinth { .. } => ModSource::Modrinth,
@@ -267,12 +322,16 @@ fn source_of(dep: &ModDependency) -> ModSource {
 }
 
 /// Walk `source_directory` (typically `<manifest_dir>/src/`) and append
-/// every file as `("overrides/<relative>", absolute_path)`. Directories
+/// every file as `("<prefix>/<relative>", absolute_path)`. Directories
 /// are recursed; symlinks are skipped silently (same as `copy_source_dir`
 /// in `cart build`). No-op if the directory doesn't exist — a pack that
-/// only ships mods is still a valid mrpack.
-async fn collect_src_overrides(
+/// only ships mods is still a valid pack in every supported format.
+///
+/// mrpack + curseforge use `prefix = "overrides"`; prism uses
+/// `"<instance-name>/.minecraft"`.
+async fn collect_src_files(
     source_directory: &Path,
+    prefix: &str,
     into: &mut Vec<(String, PathBuf)>,
 ) -> anyhow::Result<()> {
     if !fs::try_exists(source_directory).await? {
@@ -293,7 +352,7 @@ async fn collect_src_overrides(
                     format!("src/ contains a non-UTF-8 path: {}", relative.display())
                 })?;
                 // ZIP entries always use `/` separators regardless of host OS.
-                let dest = format!("overrides/{}", relative_str.replace('\\', "/"));
+                let dest = format!("{prefix}/{}", relative_str.replace('\\', "/"));
                 into.push((dest, path));
             }
         }
@@ -337,10 +396,11 @@ mod tests {
     }
 
     /// Two invariants for the src/ walk: relative paths flatten under
-    /// `overrides/` with `/` separators, and a missing `src/` is a no-op
-    /// rather than an error (mod-only packs are legal mrpacks).
+    /// the given prefix with `/` separators, and a missing `src/` is a
+    /// no-op rather than an error (mod-only packs are legal in every
+    /// format).
     #[tokio::test]
-    async fn collect_src_overrides_prefixes_and_recurses() {
+    async fn collect_src_files_prefixes_and_recurses() {
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("src");
         fs::create_dir_all(source.join("config/sub")).await.unwrap();
@@ -351,7 +411,9 @@ mod tests {
             .unwrap();
 
         let mut overrides = Vec::new();
-        collect_src_overrides(&source, &mut overrides).await.unwrap();
+        collect_src_files(&source, "overrides", &mut overrides)
+            .await
+            .unwrap();
 
         let mut dests: Vec<&str> = overrides.iter().map(|(d, _)| d.as_str()).collect();
         dests.sort();
@@ -365,11 +427,29 @@ mod tests {
         );
     }
 
+    /// A different prefix (Prism uses `"<name>/.minecraft"`) has to flow
+    /// through untouched — `src/mods/foo.jar` guard is upstream, so the
+    /// walk itself doesn't reason about which format is calling.
     #[tokio::test]
-    async fn collect_src_overrides_missing_dir_is_noop() {
+    async fn collect_src_files_honors_custom_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("src");
+        fs::create_dir_all(&source).await.unwrap();
+        fs::write(source.join("options.txt"), b"a").await.unwrap();
+
+        let mut into = Vec::new();
+        collect_src_files(&source, "my-pack/.minecraft", &mut into)
+            .await
+            .unwrap();
+        assert_eq!(into.len(), 1);
+        assert_eq!(into[0].0, "my-pack/.minecraft/options.txt");
+    }
+
+    #[tokio::test]
+    async fn collect_src_files_missing_dir_is_noop() {
         let dir = tempfile::tempdir().unwrap();
         let mut overrides = Vec::new();
-        collect_src_overrides(&dir.path().join("src"), &mut overrides)
+        collect_src_files(&dir.path().join("src"), "overrides", &mut overrides)
             .await
             .unwrap();
         assert!(overrides.is_empty());
