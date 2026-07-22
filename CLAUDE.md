@@ -20,7 +20,8 @@ cargo test               # run tests
 
 # Run the CLI
 cargo run -- init <path>              # create a new cart project at <path>
-cargo run -- add <slug>               # add a Modrinth mod (--version to pin, --disabled)
+cargo run -- modrinth add <slug>      # add a Modrinth mod (--version to pin, --disabled); alias: `mr add`
+cargo run -- curseforge add <slug>    # add a CurseForge mod (needs CURSEFORGE_API_KEY); alias: `cf add`
 cargo run -- remove <name>            # remove a mod from [mods]
 cargo run -- enable <name>            # flip the `disabled` flag off
 cargo run -- disable <name>           # flip the `disabled` flag on

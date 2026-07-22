@@ -1,19 +1,21 @@
-mod add;
 mod build;
+mod curseforge;
 mod disable;
 mod enable;
 mod init;
 mod list;
+mod modrinth;
 mod remove;
 mod run;
 mod update;
 
-pub use add::Add;
 pub use build::Build;
+pub use curseforge::Curseforge;
 pub use disable::Disable;
 pub use enable::Enable;
 pub use init::Init;
 pub use list::List;
+pub use modrinth::Modrinth;
 pub use remove::Remove;
 pub use run::Run;
 pub use update::Update;
@@ -57,9 +59,14 @@ pub enum Subcommands {
     Build(Build),
     Run(Run),
     List(List),
-    Add(Add),
     Remove(Remove),
     Disable(Disable),
     Enable(Enable),
     Update(Update),
+    /// Modrinth-sourced operations (add, …).
+    #[command(alias = "mr")]
+    Modrinth(Modrinth),
+    /// CurseForge-sourced operations (add, …).
+    #[command(alias = "cf")]
+    Curseforge(Curseforge),
 }
