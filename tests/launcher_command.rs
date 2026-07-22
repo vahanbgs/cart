@@ -3,23 +3,27 @@
 //! catches classpath/main-class/arg-substitution regressions in
 //! `Launcher::build_command` before we pay the cost of an actual launch.
 //!
-//! `#[ignore]`d because `build_command` warms the shared cart cache
-//! (`~/.cache/cart/`) on first run — downloads the version manifest,
-//! Java runtime, libraries, and assets for the version under test.
-//! Once warm, subsequent runs finish in under a second. Invoke with
+//! `#[ignore]`d because `build_command` downloads the Piston version
+//! manifest, Java runtime, libraries, and assets for the version under
+//! test. Each `cargo test` invocation gets its own per-binary temp cache
+//! via [`common::cache_dir`], so behavior is independent of the
+//! developer's `~/.cache/cart/`. The first test in a run pays the
+//! download cost; the rest share the warmed temp dir. Invoke with
 //! `cargo test --test launcher_command -- --ignored`.
+
+mod common;
 
 use cart::{Instance, Launcher, Loader, LoaderSpec};
 
 #[tokio::test]
-#[ignore = "warms the shared cart cache on first run"]
+#[ignore = "downloads Piston/Java/assets on first test per run"]
 async fn build_command_1_20_1_vanilla_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.20.1")
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -72,14 +76,14 @@ async fn build_command_1_20_1_vanilla_has_expected_shape() {
 /// classpath, natives path, resolved asset/game dirs, and the vanilla
 /// main class.
 #[tokio::test]
-#[ignore = "warms the shared cart cache on first run"]
+#[ignore = "downloads Piston/Java/assets on first test per run"]
 async fn build_command_1_12_2_vanilla_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.12.2")
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -137,7 +141,7 @@ async fn build_command_1_12_2_forge_recommended_has_expected_shape() {
         .loader(Loader::forge(LoaderSpec::Recommended))
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -217,7 +221,7 @@ async fn build_command_1_12_2_forge_latest_has_expected_shape() {
         .loader(Loader::forge(LoaderSpec::Latest))
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -291,7 +295,7 @@ async fn build_command_1_20_1_forge_recommended_has_expected_shape() {
         .loader(Loader::forge(LoaderSpec::Recommended))
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -381,7 +385,7 @@ async fn build_command_1_20_1_forge_latest_has_expected_shape() {
         .loader(Loader::forge(LoaderSpec::Latest))
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -463,7 +467,7 @@ async fn build_command_1_21_1_neoforge_latest_has_expected_shape() {
         .loader(Loader::neoforge(LoaderSpec::Latest))
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -561,7 +565,7 @@ async fn build_command_1_20_1_fabric_latest_has_expected_shape() {
         .loader(Loader::fabric(LoaderSpec::Latest))
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -645,7 +649,7 @@ async fn build_command_1_16_5_forge_recommended_has_expected_shape() {
         .loader(Loader::forge(LoaderSpec::Recommended))
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -706,7 +710,7 @@ async fn build_command_1_16_5_forge_latest_has_expected_shape() {
         .loader(Loader::forge(LoaderSpec::Latest))
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -770,7 +774,7 @@ async fn build_command_1_7_10_forge_recommended_has_expected_shape() {
         .loader(Loader::forge(LoaderSpec::Recommended))
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -834,14 +838,14 @@ async fn build_command_1_7_10_forge_recommended_has_expected_shape() {
 /// LWJGL library set. Catches version-specific classpath/Java-selection
 /// regressions independently of the 1.20.1 test.
 #[tokio::test]
-#[ignore = "warms the shared cart cache on first run"]
+#[ignore = "downloads Piston/Java/assets on first test per run"]
 async fn build_command_1_16_5_vanilla_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.16.5")
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -884,14 +888,14 @@ async fn build_command_1_16_5_vanilla_has_expected_shape() {
 /// but against a materially different library set and asset index
 /// vintage.
 #[tokio::test]
-#[ignore = "warms the shared cart cache on first run"]
+#[ignore = "downloads Piston/Java/assets on first test per run"]
 async fn build_command_1_7_10_vanilla_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.7.10")
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -934,14 +938,14 @@ async fn build_command_1_7_10_vanilla_has_expected_shape() {
 /// first LWJGL 2 library layout. Sits at the earliest end of the
 /// current codepath's compatibility surface.
 #[tokio::test]
-#[ignore = "warms the shared cart cache on first run"]
+#[ignore = "downloads Piston/Java/assets on first test per run"]
 async fn build_command_1_6_4_vanilla_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.6.4")
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -987,14 +991,14 @@ async fn build_command_1_6_4_vanilla_has_expected_shape() {
 /// modern hash-based `${assets_root}` layout. This test locks in that
 /// all three templates get resolved by `build_command`.
 #[tokio::test]
-#[ignore = "warms the shared cart cache on first run"]
+#[ignore = "downloads Piston/Java/assets on first test per run"]
 async fn build_command_1_2_5_vanilla_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.2.5")
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();
@@ -1036,14 +1040,14 @@ async fn build_command_1_2_5_vanilla_has_expected_shape() {
 /// `${game_assets}`, `pre-1.6` asset index). Lock in the same shape
 /// checks — this is the far end of the compatibility surface.
 #[tokio::test]
-#[ignore = "warms the shared cart cache on first run"]
+#[ignore = "downloads Piston/Java/assets on first test per run"]
 async fn build_command_b1_7_vanilla_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("b1.7")
         .build(game_dir.path().to_path_buf());
 
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     let program = command.as_std().get_program().to_string_lossy().into_owned();

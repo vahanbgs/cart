@@ -21,6 +21,8 @@ use std::{path::Path, time::Duration};
 
 use cart::{Instance, Launcher, Loader, LoaderKind, LoaderSpec};
 
+mod common;
+
 async fn read_log_tail(game_dir: &Path) -> String {
     match tokio::fs::read_to_string(game_dir.join("logs/latest.log")).await {
         Ok(text) => {
@@ -78,7 +80,7 @@ async fn spawn_and_watch(
     label: &str,
     watch: Duration,
 ) {
-    let launcher = Launcher::new();
+    let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (mut command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
     // If the test panics or is aborted, don't leave a Minecraft process
