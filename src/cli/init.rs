@@ -1,6 +1,6 @@
 use std::{
     fmt::{self, Display},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use anyhow::Context;
@@ -69,6 +69,11 @@ impl Init {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         fs::create_dir_all(&self.path).await?;
 
+        // Derived AFTER `create_dir_all` because `canonicalize` requires
+        // the directory to exist — matters for `cart init .` and relative
+        // paths pointing at not-yet-created nested dirs.
+        let name = derive_pack_name(&self.path)?;
+
         // If the user passed `--mv` they've already made the MC-version
         // decision on the command line — skip that prompt. The loader
         // still needs picking.
@@ -80,6 +85,11 @@ impl Init {
         let loader = pick_loader(&mc_version).await?;
 
         let mut document = DocumentMut::new();
+        // Order matters — cart.toml reads top-to-bottom in the parse
+        // tests (`parses_manifest_with_all_pack_fields`) and Cargo-style
+        // metadata belongs at the top of the file.
+        document["name"] = value(name);
+        document["version"] = value("0.1.0");
         document["minecraft"] = value(mc_version);
         if let Some(loader_str) = loader.toml_value() {
             document["loader"] = value(loader_str);
@@ -92,6 +102,30 @@ impl Init {
 
         Ok(())
     }
+}
+
+/// Pick a pack name from the directory the manifest lives in. Callers
+/// hand in the raw CLI path (`cart init <path>`); relative paths, `.`,
+/// and trailing slashes all get resolved by canonicalize so the last
+/// component reflects what the user actually sees in `ls`.
+///
+/// Requires the directory to exist — `Init::run` calls `create_dir_all`
+/// first. Returns an error if the resolved path has no file component
+/// (e.g. `cart init /`) or a non-UTF-8 name.
+fn derive_pack_name(path: &Path) -> anyhow::Result<String> {
+    let canonical = path
+        .canonicalize()
+        .with_context(|| format!("canonicalize {}", path.display()))?;
+    canonical
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(str::to_owned)
+        .with_context(|| {
+            format!(
+                "cannot derive pack name from {} — no file component or not UTF-8",
+                canonical.display()
+            )
+        })
 }
 
 /// Fetch the Piston release list and open an inquire Select. Releases are
@@ -198,4 +232,42 @@ async fn neoforge_supports_mc(http: &Client, mc_version: &str) -> bool {
         .await
         .map(|m| m.supports_mc(mc_version))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_pack_name_returns_final_component() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack_dir = dir.path().join("my-pack");
+        std::fs::create_dir(&pack_dir).unwrap();
+
+        assert_eq!(derive_pack_name(&pack_dir).unwrap(), "my-pack");
+    }
+
+    /// Trailing slashes, `.` segments, and relative paths all get
+    /// normalized by `canonicalize` — the result is the actual name
+    /// the user sees in `ls`, not whatever they happened to type.
+    #[test]
+    fn derive_pack_name_normalizes_trailing_slash_and_dot() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack_dir = dir.path().join("weird-pack");
+        std::fs::create_dir(&pack_dir).unwrap();
+
+        // e.g. `weird-pack/./`
+        let with_dot = pack_dir.join(".");
+        assert_eq!(derive_pack_name(&with_dot).unwrap(), "weird-pack");
+    }
+
+    /// Missing directory is a real error (`canonicalize` needs it to
+    /// exist) rather than a silent fallback — surface it so the caller
+    /// notices the earlier `create_dir_all` should have run first.
+    #[test]
+    fn derive_pack_name_errors_on_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist");
+        assert!(derive_pack_name(&missing).is_err());
+    }
 }
