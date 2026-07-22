@@ -6,10 +6,11 @@ pub use mod_cache::ModCache;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::bail;
+use anyhow::{Context, bail};
 use futures::StreamExt;
 use reqwest::Client;
 use sha1::{Digest, Sha1};
+use tempfile::NamedTempFile;
 use tokio::{fs, io::AsyncWriteExt};
 use url::{Origin, Url};
 
@@ -73,7 +74,14 @@ impl Cache {
 
         fs::create_dir_all(parent_directory_path).await?;
 
-        let mut file = fs::File::create(&path).await?;
+        // Stream into a uniquely-named sibling of `path` and rename it in
+        // atomically once the digest verifies. Two concurrent fetchers of
+        // the same URL each get their own temp path, so their writes can't
+        // interleave and corrupt the final file; the last rename wins and
+        // both callers observe the same bytes. On any error the `TempPath`
+        // drops and unlinks the partial file — no `.tmp` litter left behind.
+        let temp_path = NamedTempFile::new_in(parent_directory_path)?.into_temp_path();
+        let mut file = fs::File::create(&temp_path).await?;
         let mut stream = response.bytes_stream();
         let mut hasher = Sha1::new();
 
@@ -82,6 +90,7 @@ impl Cache {
             file.write_all(&chunk).await?;
             hasher.update(&chunk);
         }
+        file.flush().await?;
 
         tracing::debug!("Fetched '{url}' from the network");
 
@@ -92,6 +101,10 @@ impl Cache {
         {
             bail!("SHA-1 digest mismatch while fetching '{}'", url);
         }
+
+        temp_path
+            .persist(&path)
+            .with_context(|| format!("persist cached download for '{url}'"))?;
 
         Ok(path)
     }
