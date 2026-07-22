@@ -8,11 +8,9 @@ use anyhow::{Context, anyhow, bail};
 
 use crate::api::{
     Endpoint,
-    fabric::{self, LoaderVersions, Profile, ProfileLibrary},
+    fabric::{self, LoaderVersion, LoaderVersions, Profile, ProfileLibrary},
     forge::MavenCoordinate,
-    piston::{
-        Argument, Arguments, LibraryDownloadEntry, LibraryDownloadOptions, LibraryEntry,
-    },
+    piston::{Argument, Arguments, LibraryDownloadEntry, LibraryDownloadOptions, LibraryEntry},
 };
 
 use super::{cache::Cache, LoaderSpec};
@@ -80,6 +78,14 @@ pub async fn install(
 /// channel — Fabric has no analogue and the manifest parser rejects it, but
 /// the branch here is defense-in-depth in case a caller constructs a
 /// `Loader` value programmatically.
+///
+/// The loader listing is fetched via raw HTTP rather than through the
+/// content-addressed disk cache because its URL (`/v2/versions/loader`)
+/// collides with the parametric profile URL (`/v2/versions/loader/{mc}/…`)
+/// under the URL-mirrored cache layout — the former would be written as a
+/// FILE named `loader`, blocking the profile fetch from creating `loader/`
+/// as a directory. Uncached is also the correct semantic since new loaders
+/// release regularly.
 async fn resolve_loader_version(spec: &LoaderSpec, cache: &Cache) -> anyhow::Result<String> {
     match spec {
         LoaderSpec::Pinned(v) => Ok(v.clone()),
@@ -87,9 +93,15 @@ async fn resolve_loader_version(spec: &LoaderSpec, cache: &Cache) -> anyhow::Res
             bail!("Fabric has no `recommended` channel; use `latest` or a pinned version")
         }
         LoaderSpec::Latest => {
-            let list: LoaderVersions = cache.fetch_json(LoaderVersions::url(), None).await?;
-            list.0
-                .into_iter()
+            let list: Vec<LoaderVersion> = cache
+                .client()
+                .get(LoaderVersions::url().clone())
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            list.into_iter()
                 .find(|v| v.stable)
                 .map(|v| v.version)
                 .ok_or_else(|| anyhow!("no stable Fabric loader in listing"))

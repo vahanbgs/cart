@@ -29,6 +29,15 @@ impl Cache {
         &self.path
     }
 
+    /// The shared HTTP client. Exposed so callers can make uncached GETs
+    /// (e.g. Fabric's loader listing collides with the parametric profile
+    /// URL under the URL-mirrored cache layout and shouldn't be cached
+    /// anyway — new loaders release regularly and users would get stale
+    /// answers).
+    pub fn client(&self) -> &reqwest::Client {
+        &self.client
+    }
+
     pub async fn fetch_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &Url,
