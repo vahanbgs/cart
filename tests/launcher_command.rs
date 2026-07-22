@@ -368,6 +368,86 @@ async fn build_command_1_20_1_forge_recommended_has_expected_shape() {
     assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
 }
 
+/// 1.20.1 with `forge = "latest"` — same shape as the `recommended`
+/// test but pins the `latest` channel, which today resolves to a
+/// different build (47.4.22 vs. 47.4.10). Guards the processor
+/// pipeline against regressions specific to the newer build.
+#[tokio::test]
+#[ignore = "warms the shared cart cache on first run; also hits Forge promotions + installer + processor pipeline"]
+async fn build_command_1_20_1_forge_latest_has_expected_shape() {
+    let game_dir = tempfile::tempdir().unwrap();
+    let instance = Instance::builder()
+        .version("1.20.1")
+        .forge_spec("latest")
+        .build(game_dir.path().to_path_buf());
+
+    let launcher = Launcher::new();
+    let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
+
+    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let args: Vec<String> = command
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+
+    assert!(
+        program.contains("java"),
+        "expected bundled java runtime, got: {program}"
+    );
+    assert!(
+        args.iter()
+            .any(|a| a == "cpw.mods.bootstraplauncher.BootstrapLauncher"),
+        "expected bootstraplauncher main class in args:\n{args:#?}"
+    );
+
+    let target_index = args
+        .iter()
+        .position(|a| a == "--launchTarget")
+        .expect("expected --launchTarget in args");
+    assert_eq!(
+        args.get(target_index + 1).map(String::as_str),
+        Some("forgeclient"),
+        "wrong launchTarget value in args:\n{args:#?}"
+    );
+
+    let module_path_index = args
+        .iter()
+        .position(|a| a == "-p")
+        .expect("expected -p (module path) in args");
+    let module_path = args
+        .get(module_path_index + 1)
+        .expect("expected module path value after -p");
+    assert!(
+        !module_path.contains("${"),
+        "unresolved template in module path: {module_path}"
+    );
+    assert!(
+        module_path.contains("bootstraplauncher"),
+        "module path missing bootstraplauncher entry:\n{module_path}"
+    );
+
+    for var in [
+        "${classpath}",
+        "${natives_directory}",
+        "${assets_root}",
+        "${assets_index_name}",
+        "${game_directory}",
+        "${version_name}",
+        "${library_directory}",
+        "${classpath_separator}",
+    ] {
+        let leaked: Vec<&String> = args.iter().filter(|a| a.contains(var)).collect();
+        assert!(
+            leaked.is_empty(),
+            "critical template {var} left unresolved in: {leaked:#?}"
+        );
+    }
+
+    assert!(args.iter().any(|a| a == "-Xmx4G"), "missing -Xmx4G");
+    assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
+}
+
 /// 1.16.5 with `forge = "recommended"` — middle-era Forge. Uses
 /// `cpw.mods.modlauncher.Launcher` (the predecessor to
 /// bootstraplauncher — no JPMS module path yet) and Forge's launch
