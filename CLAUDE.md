@@ -24,6 +24,8 @@ cargo run -- modrinth add <slug>      # add a Modrinth mod (--version to pin, --
 cargo run -- modrinth search <query>  # list top Modrinth mod matches (--limit N); alias: `mr search`
 cargo run -- modrinth find <query>    # interactive: search, pick from menu, add to manifest; alias: `mr find`
 cargo run -- curseforge add <slug>    # add a CurseForge mod (needs CURSEFORGE_API_KEY); alias: `cf add`
+cargo run -- curseforge search <query> # list top CurseForge mod matches (--limit N); alias: `cf search`
+cargo run -- curseforge find <query>  # interactive: search, pick from menu, add to manifest; alias: `cf find`
 cargo run -- remove <name>            # remove a mod from [mods]
 cargo run -- enable <name>            # flip the `disabled` flag off
 cargo run -- disable <name>           # flip the `disabled` flag on
