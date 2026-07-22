@@ -15,12 +15,14 @@ pub struct Modrinth {
 #[derive(Subcommand)]
 pub enum ModrinthCommand {
     Add(Add),
+    Search(Search),
 }
 
 impl Modrinth {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         match &self.command {
             ModrinthCommand::Add(add) => add.run(cli).await,
+            ModrinthCommand::Search(search) => search.run(cli).await,
         }
     }
 }
@@ -97,5 +99,73 @@ impl Add {
         );
 
         Ok(())
+    }
+}
+
+#[derive(Args)]
+pub struct Search {
+    /// Free-text query. Passed verbatim to Modrinth's `/v2/search`.
+    pub query: String,
+
+    /// Maximum number of results to print. Modrinth returns at most 100
+    /// per page; cart doesn't paginate.
+    #[arg(long, default_value_t = 10)]
+    pub limit: u32,
+}
+
+impl Search {
+    pub async fn run(&self, _cli: &Cli) -> anyhow::Result<()> {
+        let http = Client::new();
+        let hits = modrinth::search(&http, &self.query, self.limit).await?;
+
+        if hits.is_empty() {
+            return Ok(());
+        }
+
+        let slug_width = hits.iter().map(|h| h.slug.len()).max().unwrap_or(0);
+        let title_width = hits.iter().map(|h| h.title.len()).max().unwrap_or(0);
+        let downloads_labels: Vec<String> =
+            hits.iter().map(|h| format_downloads(h.downloads)).collect();
+        let downloads_width = downloads_labels
+            .iter()
+            .map(|s| s.len())
+            .max()
+            .unwrap_or(0);
+
+        for (hit, downloads) in hits.iter().zip(downloads_labels.iter()) {
+            let description = truncate(&hit.description, 60);
+            println!(
+                "{slug:<slug_width$}  {title:<title_width$}  {downloads:>downloads_width$}  {description}",
+                slug = hit.slug,
+                title = hit.title,
+            );
+        }
+
+        Ok(())
+    }
+}
+
+/// Compact download counts for the search table: `77.0M`, `31.8k`, `310`.
+/// Bare `77041094` is noise in a narrow column and Modrinth's own site
+/// uses the same abbreviation, so users read it fluently.
+fn format_downloads(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Truncate on character boundaries — Modrinth descriptions can contain
+/// multi-byte characters and a byte-based slice would panic.
+fn truncate(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_owned()
+    } else {
+        let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+        out.push('…');
+        out
     }
 }
