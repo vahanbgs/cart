@@ -204,6 +204,79 @@ async fn build_command_1_12_2_forge_recommended_has_expected_shape() {
     assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
 }
 
+/// 1.12.2 with `forge = "latest"` — same shape as the `recommended`
+/// test but pins the `latest` promotion channel, which today resolves
+/// to a different build (14.23.5.2864 vs. 14.23.5.2859). Guards against
+/// the two channels ever diverging in ways that break assembly.
+#[tokio::test]
+#[ignore = "warms the shared cart cache on first run; also hits Forge promotions + installer"]
+async fn build_command_1_12_2_forge_latest_has_expected_shape() {
+    let game_dir = tempfile::tempdir().unwrap();
+    let instance = Instance::builder()
+        .version("1.12.2")
+        .forge_spec("latest")
+        .build(game_dir.path().to_path_buf());
+
+    let launcher = Launcher::new();
+    let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
+
+    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let args: Vec<String> = command
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+
+    assert!(
+        program.contains("java"),
+        "expected bundled java runtime, got: {program}"
+    );
+    assert!(
+        args.iter().any(|a| a == "net.minecraft.launchwrapper.Launch"),
+        "expected launchwrapper main class in args:\n{args:#?}"
+    );
+
+    let tweak_index = args
+        .iter()
+        .position(|a| a == "--tweakClass")
+        .expect("expected --tweakClass in args");
+    assert_eq!(
+        args.get(tweak_index + 1).map(String::as_str),
+        Some("net.minecraftforge.fml.common.launcher.FMLTweaker"),
+        "wrong tweakClass value in args:\n{args:#?}"
+    );
+
+    for var in [
+        "${classpath}",
+        "${natives_directory}",
+        "${assets_root}",
+        "${assets_index_name}",
+        "${game_directory}",
+        "${version_name}",
+    ] {
+        let leaked: Vec<&String> = args.iter().filter(|a| a.contains(var)).collect();
+        assert!(
+            leaked.is_empty(),
+            "critical template {var} left unresolved in: {leaked:#?}"
+        );
+    }
+
+    let classpath_index = args
+        .iter()
+        .position(|a| a == "-cp")
+        .expect("expected -cp in args");
+    let classpath = args
+        .get(classpath_index + 1)
+        .expect("expected classpath value after -cp");
+    assert!(
+        classpath.contains("forge"),
+        "no forge-named entry on classpath — Forge libraries missing?\n{classpath}"
+    );
+
+    assert!(args.iter().any(|a| a == "-Xmx4G"), "missing -Xmx4G");
+    assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
+}
+
 /// 1.20.1 with `forge = "recommended"` — modern-era Forge. Main
 /// class is `cpw.mods.bootstraplauncher.BootstrapLauncher`, the
 /// launcher shells into it via a JPMS module path (`-p`) rather
