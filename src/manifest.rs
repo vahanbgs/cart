@@ -1,4 +1,5 @@
 mod document;
+mod loader;
 mod mod_dependency;
 
 pub use document::{
