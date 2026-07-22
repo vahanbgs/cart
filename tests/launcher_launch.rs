@@ -6,10 +6,11 @@
 //! ordering bugs, missing natives, wrong Java major, unresolved
 //! templates that MC can't tolerate.
 //!
-//! Requires a real display — MC opens actual game windows. Serialize
-//! with `--test-threads=1` unless you enjoy 16 MC windows fighting for
-//! focus at once:
-//!     cargo test --test launcher_launch -- --ignored --test-threads=1
+//! Requires a real display — MC opens actual game windows. A shared
+//! [`LAUNCH_PERMITS`] semaphore caps live MC processes at
+//! [`MAX_CONCURRENT_LAUNCHES`] regardless of `--test-threads`, so you
+//! can safely crank cargo's parallelism:
+//!     cargo test --test launcher_launch -- --ignored --test-threads=8
 //!
 //! Do NOT try to run these under Xvfb, Wayland-headless shims, VNC, or
 //! any other virtual display — LWJGL/GLFW's interaction with real
@@ -38,8 +39,19 @@
 use std::{path::Path, time::Duration};
 
 use cart::{Instance, Launcher, Loader, LoaderKind, LoaderSpec};
+use tokio::sync::Semaphore;
 
 mod common;
+
+/// Maximum number of MC processes alive at once. Three concurrent JVMs
+/// peak around 3-6 GB of RAM plus GPU contention — comfortable on any
+/// modern desktop, and past this returns diminish quickly because MC
+/// init is GPU-bound and there's only one GPU.
+const MAX_CONCURRENT_LAUNCHES: usize = 3;
+
+/// Bounds concurrent MC spawns across all tests in the binary, regardless
+/// of cargo's `--test-threads` setting. Held from spawn through reap.
+static LAUNCH_PERMITS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_LAUNCHES);
 
 /// Substring that appears in every log4j-era MC launch log once LWJGL
 /// has been loaded and reported its version — proof that classpath,
@@ -113,6 +125,13 @@ async fn spawn_and_watch(instance: Instance, game_dir: tempfile::TempDir, label:
     // If the test panics or is aborted, don't leave a Minecraft process
     // orphaned running against the user's display.
     command.kill_on_drop(true);
+
+    // Bound peak MC concurrency. The permit is held from spawn through
+    // kill+reap so RAM/GPU pressure never exceeds MAX_CONCURRENT_LAUNCHES.
+    let _launch_permit = LAUNCH_PERMITS
+        .acquire()
+        .await
+        .expect("LAUNCH_PERMITS never closes");
 
     let mut child = command.spawn().expect("spawn minecraft");
     let log_path = game_dir.path().join("logs/latest.log");
