@@ -9,6 +9,7 @@
 
 use cart::api::{
     Endpoint,
+    curseforge,
     modrinth,
     piston::{
         AssetManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent, Version,
@@ -114,4 +115,26 @@ async fn modrinth_search_still_returns_hits() {
         "expected appleskin in top-3 hits: got {:?}",
         hits.iter().map(|h| &h.slug).collect::<Vec<_>>()
     );
+}
+
+/// CurseForge live-fetch — requires `CURSEFORGE_API_KEY`. Skipped with
+/// a stderr note when the key isn't set so it's usable in dev shells
+/// where CF creds aren't provisioned, without silently masking real
+/// regressions when they are.
+#[tokio::test]
+#[ignore = "hits the network"]
+async fn curseforge_search_still_returns_hits() {
+    let Ok(key) = std::env::var("CURSEFORGE_API_KEY") else {
+        eprintln!("skipping: CURSEFORGE_API_KEY not set");
+        return;
+    };
+    let client = curseforge::client(&key).expect("build cf client");
+    let hits = curseforge::search(&client, "just enough items", 5)
+        .await
+        .expect("cf search");
+    assert!(!hits.is_empty(), "search returned no hits");
+    for h in &hits {
+        assert!(!h.slug.is_empty(), "hit {} has empty slug", h.id);
+        assert!(!h.primary_author().is_empty(), "hit {} has no author", h.slug);
+    }
 }

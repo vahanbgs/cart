@@ -24,14 +24,29 @@ pub enum LoaderType {
     NeoForge = 6,
 }
 
-/// `GET /v1/mods/search?gameId=432&slug=<slug>` — the endpoint we hit
-/// from `cart add curseforge:<slug>` to turn a human slug into a stable
-/// numeric project id.
-pub fn search_url(slug: &str) -> Url {
+/// `GET /v1/mods/search?gameId=432&slug=<slug>` — narrow lookup used by
+/// `find_project_by_slug` to turn a human slug into a stable numeric
+/// project id. Not for user-visible search — that's `search_url`.
+pub fn slug_search_url(slug: &str) -> Url {
     let mut url = BASE_URL.join("v1/mods/search").unwrap();
     url.query_pairs_mut()
         .append_pair("gameId", &MINECRAFT_GAME_ID.to_string())
         .append_pair("slug", slug);
+    url
+}
+
+/// `GET /v1/mods/search?gameId=432&classId=6&searchFilter=<q>&pageSize=<n>`
+/// — the mod-class subset of CurseForge's full-text search. Used by
+/// `cart curseforge search`. `classId=6` is CurseForge's "Mods" class,
+/// pinned so the query doesn't surface shader-pack / resource-pack /
+/// modpack hits.
+pub fn search_url(query: &str, limit: u32) -> Url {
+    let mut url = BASE_URL.join("v1/mods/search").unwrap();
+    url.query_pairs_mut()
+        .append_pair("gameId", &MINECRAFT_GAME_ID.to_string())
+        .append_pair("classId", "6")
+        .append_pair("searchFilter", query)
+        .append_pair("pageSize", &limit.to_string());
     url
 }
 
@@ -72,6 +87,38 @@ struct Envelope<T> {
 pub struct Mod {
     pub id: u32,
     pub slug: String,
+    pub name: String,
+}
+
+/// One search-page entry. Slimmed to what the CLI renders — CurseForge
+/// returns thirty-plus fields per hit (screenshots, categories,
+/// latestFiles, dateModified, links, …) that aren't shown, so ignoring
+/// them at the serde layer keeps the parse cheap.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub id: u32,
+    pub slug: String,
+    pub name: String,
+    #[serde(default)]
+    pub summary: String,
+    pub download_count: u64,
+    /// CurseForge always returns at least one entry, but treat it as
+    /// optional against future schema drift.
+    #[serde(default)]
+    pub authors: Vec<Author>,
+}
+
+impl SearchHit {
+    /// First author's name, or `"—"` when the (unlikely) empty list case
+    /// hits — the CLI needs a fixed placeholder to keep columns aligned.
+    pub fn primary_author(&self) -> &str {
+        self.authors.first().map(|a| a.name.as_str()).unwrap_or("—")
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Author {
     pub name: String,
 }
 
@@ -143,7 +190,7 @@ pub fn client(api_key: &str) -> anyhow::Result<Client> {
 /// happily match `jei-tweaker` if the exact one weren't first.
 pub async fn find_project_by_slug(http: &Client, slug: &str) -> anyhow::Result<Mod> {
     let envelope: Envelope<Vec<Mod>> = http
-        .get(search_url(slug))
+        .get(slug_search_url(slug))
         .send()
         .await?
         .error_for_status()?
@@ -154,6 +201,19 @@ pub async fn find_project_by_slug(http: &Client, slug: &str) -> anyhow::Result<M
         .into_iter()
         .find(|m| m.slug == slug)
         .with_context(|| format!("slug '{slug}' not found on CurseForge"))
+}
+
+/// Full-text mod search, capped at `limit` hits. Ordering is
+/// CurseForge's default (server-computed relevance).
+pub async fn search(http: &Client, query: &str, limit: u32) -> anyhow::Result<Vec<SearchHit>> {
+    let envelope: Envelope<Vec<SearchHit>> = http
+        .get(search_url(query, limit))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(envelope.data)
 }
 
 /// Newest file compatible with the given Minecraft + loader. Used by

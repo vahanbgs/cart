@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use cart::api::curseforge::{File, HashAlgo, Mod};
+use cart::api::curseforge::{File, HashAlgo, Mod, SearchHit};
 use serde::Deserialize;
 
 /// Re-declaration of the private `Envelope<T>` in the module. CurseForge
@@ -131,4 +131,21 @@ fn single_file_endpoint_deserializes_into_one_file() {
 fn hash_algo_discriminants_match_curseforge() {
     assert_eq!(HashAlgo::Sha1 as u8, 1);
     assert_eq!(HashAlgo::Md5 as u8, 2);
+}
+
+/// The full-text `/v1/mods/search` response decodes into `SearchHit`
+/// with the render fields the CLI prints (slug, name, summary,
+/// downloadCount, authors). Uses a real live response — CurseForge
+/// returns two dozen more fields per hit; ignoring them at the serde
+/// layer must not fail deserialization.
+#[test]
+fn search_hits_deserialize_with_render_fields() {
+    let hits: Vec<SearchHit> = from_fixture("search_full_text_appleskin.json");
+    assert!(!hits.is_empty(), "no hits in fixture");
+    for h in &hits {
+        assert!(!h.slug.is_empty(), "hit {} has empty slug", h.id);
+        assert!(!h.name.is_empty(), "hit {} has empty name", h.id);
+        assert!(!h.authors.is_empty(), "hit {} has no authors", h.slug);
+        assert!(!h.primary_author().is_empty());
+    }
 }
