@@ -100,10 +100,15 @@ impl Launcher {
 
         // ── Loader ────────────────────────────────────────────────────────────
         let mut resolved_forge_version: Option<String> = None;
-        let (client_jar, forge_extra_libraries, forge_main_class, forge_game_args, forge_jvm_args) =
-            match instance.loader() {
-                None => (vanilla_client_jar, vec![], None, (None, vec![]), vec![]),
-                Some(loader) if loader.kind == LoaderKind::Forge => {
+        let (client_jar, forge_extra_libraries, forge_main_class, forge_game_args, forge_jvm_args) = match instance
+            .loader()
+            .map(|l| (l, l.kind))
+        {
+            None => (vanilla_client_jar, vec![], None, (None, vec![]), vec![]),
+            Some((_, LoaderKind::NeoForge)) => {
+                anyhow::bail!("neoforge loader is not yet wired up in the launch pipeline");
+            }
+            Some((loader, LoaderKind::Forge)) => {
                     let forge_channel = match &loader.spec {
                         LoaderSpec::Latest => "latest",
                         LoaderSpec::Recommended => "recommended",
@@ -151,23 +156,21 @@ impl Launcher {
                         jvm_args,
                     )
                 }
-                Some(loader) => {
-                    // Fabric: no client-JAR patching, no legacy game-args
-                    // string. Extra libs come from the profile JSON, the
-                    // JVM boots KnotClient, and the modern game/jvm args
-                    // are merged on top of vanilla's.
-                    debug_assert!(loader.kind == LoaderKind::Fabric);
-                    let result =
-                        fabric::install(version_id, &loader.spec, &self.cache).await?;
-                    (
-                        vanilla_client_jar,
-                        result.libraries,
-                        Some(result.main_class),
-                        (None, result.game_args),
-                        result.jvm_args,
-                    )
-                }
-            };
+            Some((loader, LoaderKind::Fabric)) => {
+                // Fabric: no client-JAR patching, no legacy game-args
+                // string. Extra libs come from the profile JSON, the
+                // JVM boots KnotClient, and the modern game/jvm args
+                // are merged on top of vanilla's.
+                let result = fabric::install(version_id, &loader.spec, &self.cache).await?;
+                (
+                    vanilla_client_jar,
+                    result.libraries,
+                    Some(result.main_class),
+                    (None, result.game_args),
+                    result.jvm_args,
+                )
+            }
+        };
 
         let classpath = java::build_class_path(
             &version,

@@ -55,6 +55,7 @@ impl Add {
         let loader = match config.manifest().loader.as_ref().map(|l| l.kind) {
             Some(cart::LoaderKind::Fabric) => "fabric",
             Some(cart::LoaderKind::Forge) => "forge",
+            Some(cart::LoaderKind::NeoForge) => "neoforge",
             None => "vanilla",
         };
 
@@ -109,6 +110,7 @@ impl Add {
         let loader = config.manifest().loader.as_ref().map(|l| match l.kind {
             cart::LoaderKind::Fabric => curseforge::LoaderType::Fabric,
             cart::LoaderKind::Forge => curseforge::LoaderType::Forge,
+            cart::LoaderKind::NeoForge => curseforge::LoaderType::NeoForge,
         });
 
         let key = std::env::var(CURSEFORGE_API_KEY_ENV).with_context(|| {

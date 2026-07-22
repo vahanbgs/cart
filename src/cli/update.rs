@@ -28,11 +28,13 @@ impl Update {
         let modrinth_loader = match loader_kind {
             Some(cart::LoaderKind::Fabric) => "fabric",
             Some(cart::LoaderKind::Forge) => "forge",
+            Some(cart::LoaderKind::NeoForge) => "neoforge",
             None => "vanilla",
         };
         let curseforge_loader = loader_kind.map(|k| match k {
             cart::LoaderKind::Fabric => curseforge::LoaderType::Fabric,
             cart::LoaderKind::Forge => curseforge::LoaderType::Forge,
+            cart::LoaderKind::NeoForge => curseforge::LoaderType::NeoForge,
         });
 
         // Named subset validation — fail fast on typos rather than silently

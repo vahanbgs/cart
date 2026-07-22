@@ -57,6 +57,7 @@ async fn assert_launches_with_loader_cleanly(
         kind = match loader.kind {
             LoaderKind::Fabric => "fabric",
             LoaderKind::Forge => "forge",
+            LoaderKind::NeoForge => "neoforge",
         },
         spec = match &loader.spec {
             LoaderSpec::Latest => "latest".to_owned(),

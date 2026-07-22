@@ -102,6 +102,7 @@ async fn resolve_url(
             let loader = match manifest.loader.as_ref().map(|l| l.kind) {
                 Some(cart::LoaderKind::Fabric) => "fabric",
                 Some(cart::LoaderKind::Forge) => "forge",
+                Some(cart::LoaderKind::NeoForge) => "neoforge",
                 None => "vanilla",
             };
             let resolved = modrinth::resolve(

@@ -45,7 +45,7 @@ The crate is structured as both a binary and a library. `src/main.rs` is the bin
 
 **Key types:**
 - `Manifest` (`src/manifest.rs`) — `cart.toml` deserialization. Fields: `minecraft: String`, `loader: Option<cart::Loader>`, `mods: HashMap<String, ModDependency>`
-- `Loader` (`src/launcher/loader.rs`) — `{ kind: LoaderKind, spec: LoaderSpec }` where `LoaderKind ∈ {Forge, Fabric}` and `LoaderSpec ∈ {Latest, Recommended, Pinned(String)}`. `Recommended` is Forge-only, rejected at parse time for Fabric.
+- `Loader` (`src/launcher/loader.rs`) — `{ kind: LoaderKind, spec: LoaderSpec }` where `LoaderKind ∈ {Forge, Fabric, NeoForge}` and `LoaderSpec ∈ {Latest, Recommended, Pinned(String)}`. `Recommended` is Forge-only, rejected at parse time for Fabric and NeoForge.
 - `ModDependency` (`src/manifest/mod_dependency.rs`) — untagged serde enum with two variants: `Modrinth { modrinth, version, disabled }` (loose if `version` is `None`) and `Url { url, disabled }`. `filename()` returns `<name>.jar` or `<name>.jar.disabled`
 - `manifest::document` — `toml_edit`-based helpers (`load_document`, `save_document`, `add_modrinth_mod`, `remove_mod`, `set_mod_disabled`, `set_mod_version`). All the mutating subcommands go through these so comments and formatting in `cart.toml` are preserved
 - `Config` (`src/config.rs`) — merges manifest with CLI flag overrides (e.g. `--mv` overrides `minecraft` field)

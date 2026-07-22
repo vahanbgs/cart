@@ -3,9 +3,11 @@
 //! ```toml
 //! # loader = "fabric"                     # → Fabric latest
 //! # loader = "forge"                      # → Forge latest
+//! # loader = "neoforge"                   # → NeoForge latest
 //! # loader = { fabric = "0.15.7" }        # pinned Fabric loader
 //! # loader = { forge = "recommended" }    # Forge's stable channel
 //! # loader = { forge = "47.3.12" }        # pinned Forge build
+//! # loader = { neoforge = "20.4.237" }    # pinned NeoForge build
 //! ```
 
 use serde::{Deserialize, Deserializer};
@@ -15,6 +17,7 @@ use serde::{Deserialize, Deserializer};
 pub enum LoaderKind {
     Fabric,
     Forge,
+    NeoForge,
 }
 
 /// Version specifier for a loader. `Recommended` is Forge-only; Fabric has no
@@ -57,6 +60,13 @@ impl Loader {
             spec,
         }
     }
+
+    pub fn neoforge(spec: LoaderSpec) -> Self {
+        Self {
+            kind: LoaderKind::NeoForge,
+            spec,
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for Loader {
@@ -67,6 +77,20 @@ impl<'de> Deserialize<'de> for Loader {
             Bare(LoaderKind),
             Forge { forge: String },
             Fabric { fabric: String },
+            NeoForge { neoforge: String },
+        }
+
+        fn reject_recommended<E: serde::de::Error>(
+            spec: LoaderSpec,
+            loader_name: &str,
+        ) -> Result<LoaderSpec, E> {
+            if matches!(spec, LoaderSpec::Recommended) {
+                Err(serde::de::Error::custom(format!(
+                    "`recommended` is a Forge-only channel; {loader_name} only has `latest` or a pinned version"
+                )))
+            } else {
+                Ok(spec)
+            }
         }
 
         let repr = Repr::deserialize(deserializer)?;
@@ -79,18 +103,14 @@ impl<'de> Deserialize<'de> for Loader {
                 kind: LoaderKind::Forge,
                 spec: LoaderSpec::parse(&forge),
             },
-            Repr::Fabric { fabric } => {
-                let spec = LoaderSpec::parse(&fabric);
-                if matches!(spec, LoaderSpec::Recommended) {
-                    return Err(serde::de::Error::custom(
-                        "`recommended` is a Forge-only channel; Fabric only has `latest` or a pinned version",
-                    ));
-                }
-                Loader {
-                    kind: LoaderKind::Fabric,
-                    spec,
-                }
-            }
+            Repr::Fabric { fabric } => Loader {
+                kind: LoaderKind::Fabric,
+                spec: reject_recommended(LoaderSpec::parse(&fabric), "Fabric")?,
+            },
+            Repr::NeoForge { neoforge } => Loader {
+                kind: LoaderKind::NeoForge,
+                spec: reject_recommended(LoaderSpec::parse(&neoforge), "NeoForge")?,
+            },
         };
         Ok(loader)
     }
@@ -186,6 +206,34 @@ mod tests {
     #[test]
     fn fabric_recommended_rejected() {
         let err = parse_err(r#"loader = { fabric = "recommended" }"#);
+        assert!(err.contains("Forge-only"), "got: {err}");
+    }
+
+    #[test]
+    fn bare_string_neoforge_is_latest() {
+        assert_eq!(
+            parse(r#"loader = "neoforge""#),
+            Loader {
+                kind: LoaderKind::NeoForge,
+                spec: LoaderSpec::Latest,
+            }
+        );
+    }
+
+    #[test]
+    fn neoforge_pinned_version() {
+        assert_eq!(
+            parse(r#"loader = { neoforge = "20.4.237" }"#),
+            Loader {
+                kind: LoaderKind::NeoForge,
+                spec: LoaderSpec::Pinned("20.4.237".to_owned()),
+            }
+        );
+    }
+
+    #[test]
+    fn neoforge_recommended_rejected() {
+        let err = parse_err(r#"loader = { neoforge = "recommended" }"#);
         assert!(err.contains("Forge-only"), "got: {err}");
     }
 }
