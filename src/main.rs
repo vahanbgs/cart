@@ -59,6 +59,9 @@ async fn main() -> anyhow::Result<()> {
         Subcommands::Curseforge(curseforge) => {
             curseforge.run(&cli).await?;
         }
+        Subcommands::Export(export) => {
+            export.run(&cli).await?;
+        }
     }
 
     Ok(())

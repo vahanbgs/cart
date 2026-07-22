@@ -2,6 +2,7 @@ mod build;
 mod curseforge;
 mod disable;
 mod enable;
+mod export;
 mod init;
 mod list;
 mod modrinth;
@@ -13,6 +14,7 @@ pub use build::Build;
 pub use curseforge::Curseforge;
 pub use disable::Disable;
 pub use enable::Enable;
+pub use export::Export;
 pub use init::Init;
 pub use list::List;
 pub use modrinth::Modrinth;
@@ -69,4 +71,6 @@ pub enum Subcommands {
     /// CurseForge-sourced operations (add, …).
     #[command(alias = "cf")]
     Curseforge(Curseforge),
+    /// Package the pack for redistribution: mrpack, curseforge, prism.
+    Export(Export),
 }

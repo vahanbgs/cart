@@ -26,6 +26,7 @@ cargo run -- modrinth find <query>    # interactive: search, pick from menu, add
 cargo run -- curseforge add <slug>    # add a CurseForge mod (needs CURSEFORGE_API_KEY); alias: `cf add`
 cargo run -- curseforge search <query> # list top CurseForge mod matches (--limit N); alias: `cf search`
 cargo run -- curseforge find <query>  # interactive: search, pick from menu, add to manifest; alias: `cf find`
+cargo run -- export <format>          # package pack as mrpack / curseforge / prism (format modules land in a later phase)
 cargo run -- remove <name>            # remove a mod from [mods]
 cargo run -- enable <name>            # flip the `disabled` flag off
 cargo run -- disable <name>           # flip the `disabled` flag on

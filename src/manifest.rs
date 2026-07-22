@@ -17,9 +17,6 @@ use anyhow::bail;
 use serde::Deserialize;
 use tokio::fs;
 
-// `name`/`version`/`authors`/`summary` are only read by `cart export`,
-// added in a later phase. The `allow` disappears with the export code.
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct Manifest {
     /// Human-readable pack name. Required at export time (all three
@@ -35,10 +32,14 @@ pub struct Manifest {
     /// Pack authors. Cargo-style plural even when there's one — CF's
     /// `manifest.json` takes a single `author` string, so cart joins
     /// with `, ` at export time when needed.
+    // `authors` and `summary` are read only by format modules that land
+    // in Phase 1+. The allows go away when they do.
     #[serde(default)]
+    #[allow(dead_code)]
     pub authors: Vec<String>,
 
     /// Short pack description. Optional in all three export formats.
+    #[allow(dead_code)]
     pub summary: Option<String>,
 
     pub minecraft: String,
