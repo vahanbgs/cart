@@ -130,6 +130,7 @@ impl Launcher {
                     };
 
                     let result = forge::install(
+                        forge::ForgeFlavor::Forge,
                         &forge_version,
                         &vanilla_client_jar,
                         &java_path,
@@ -172,10 +173,19 @@ impl Launcher {
             }
         };
 
+        // Forge-family extras have empty artifact URLs; their cache paths
+        // are derived from the flavor's maven base. For now only Forge is
+        // dispatched (Fabric populates its URLs directly; NeoForge branch
+        // still bails); step 4 will thread NeoForge's base through here.
+        let forge_family_maven_base = match instance.loader().map(|l| l.kind) {
+            Some(LoaderKind::Forge) => Some(forge::FORGE_MAVEN_URL.clone()),
+            _ => None,
+        };
         let classpath = java::build_class_path(
             &version,
             &client_jar,
             &forge_extra_libraries,
+            forge_family_maven_base.as_ref(),
             &natives_directory,
             &self.cache,
         )
@@ -241,8 +251,12 @@ impl Launcher {
             // for FMLLoader to locate processor outputs (PATCHED, MC_SRG, …).
             // Must match the local dir used by the Forge install pipeline.
             (
+                // For now this always resolves to Forge's local maven
+                // dir; the NeoForge branch will override it in step 4.
+                // Vanilla and Fabric args don't reference this template,
+                // so the wrong flavor here is harmless for those paths.
                 "library_directory",
-                forge::local_maven_dir(&self.cache)
+                forge::local_maven_dir(forge::ForgeFlavor::Forge, &self.cache)
                     .to_string_lossy()
                     .into_owned(),
             ),

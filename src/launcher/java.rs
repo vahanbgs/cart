@@ -26,9 +26,6 @@ use crate::api::{
 static MOJANG_LIBRARIES_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://libraries.minecraft.net/").unwrap());
 
-static FORGE_MAVEN_URL: LazyLock<Url> =
-    LazyLock::new(|| Url::parse("https://maven.minecraftforge.net/").unwrap());
-
 use super::cache::Cache;
 
 async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
@@ -105,10 +102,16 @@ pub async fn fetch_java_distribution(
 /// vanilla's log4j 2.8.1 also on the classpath and loaded first, so
 /// modlauncher (compiled against 2.15.0's API) crashes with
 /// `NoSuchMethodError` on ThrowablePatternConverter.
+/// `forge_family_maven_base` is the fallback maven base for extra libraries
+/// whose `downloads.artifact.url` is empty — the forge-family install
+/// pipeline extracts those into a cache path derived from this base. `None`
+/// when there are no forge-family extras (vanilla, or Fabric which always
+/// populates `downloads.artifact.url`).
 pub async fn build_class_path(
     version_manifest: &Version,
     client_jar: &Path,
     extra_libraries: &[LibraryEntry],
+    forge_family_maven_base: Option<&Url>,
     natives_directory: &TempDir,
     cache: &Cache,
 ) -> anyhow::Result<String> {
@@ -185,9 +188,17 @@ pub async fn build_class_path(
             cache.fetch(url, sha1).await?
         } else if let Some(artifact) = &lib.downloads.artifact {
             // downloads.artifact present but URL is empty: the JAR is bundled
-            // in the Forge installer. forge::install() already extracted it to
-            // the Forge Maven cache path derived from artifact.path.
-            let url = FORGE_MAVEN_URL
+            // in the Forge-family installer. forge::install() already extracted
+            // it to a cache path derived from the flavor's maven base.
+            let base = forge_family_maven_base.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "extra library {} has empty download URL but no forge-family \
+                     maven base was passed to build_class_path — the caller must \
+                     supply one when passing extras from a forge-family install",
+                    lib.name
+                )
+            })?;
+            let url = base
                 .join(&artifact.path.to_string_lossy())
                 .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
             cache.fetch(&url, Some(&artifact.sha1)).await?

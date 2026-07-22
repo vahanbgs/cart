@@ -10,26 +10,72 @@ use tokio::{fs, process::Command};
 use url::Url;
 use zip::ZipArchive;
 
-use crate::api::forge::{
-    ForgeVersion, InstallProfile, MavenCoordinate, Processor, installer_url_candidates,
+use crate::api::{
+    forge::{ForgeVersion, InstallProfile, MavenCoordinate, Processor},
+    neoforge,
 };
 
 /// The `data` key whose client value is the Maven coord of the patched client
 /// JAR produced by the Forge install pipeline (spec 0+).
 const PATCHED_DATA_KEY: &str = "PATCHED";
 
-/// Local Maven-style working directory for the Forge install pipeline.  This
-/// is both where processor outputs land and the `library_directory` that
-/// modern (1.17+) Forge JVM args and FMLLoader resolve paths against — so it
-/// must be a single directory that also contains every downloaded Forge lib.
-pub fn local_maven_dir(cache: &Cache) -> PathBuf {
-    cache.directory().join("maven.minecraftforge.net")
-}
-
 use super::cache::Cache;
 
-static FORGE_MAVEN_URL: LazyLock<Url> =
+pub static FORGE_MAVEN_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://maven.minecraftforge.net/").unwrap());
+
+pub static NEOFORGE_MAVEN_URL: LazyLock<Url> =
+    LazyLock::new(|| Url::parse("https://maven.neoforged.net/releases/").unwrap());
+
+/// Forge-family installer flavor. Both Forge and NeoForge share the same
+/// install pipeline (installer JAR → install_profile.json → processors →
+/// patched client + extra libraries + version.json overlay); only the
+/// maven base URL, installer path, and version quirks differ.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ForgeFlavor {
+    Forge,
+    NeoForge,
+}
+
+impl ForgeFlavor {
+    pub fn maven_base_url(&self) -> &'static Url {
+        match self {
+            Self::Forge => &FORGE_MAVEN_URL,
+            Self::NeoForge => &NEOFORGE_MAVEN_URL,
+        }
+    }
+
+    /// Subdirectory under the cache root where this flavor's local maven
+    /// mirror lives. Matches the URL-mirrored layout `Cache::path_from_url`
+    /// uses (host + release-repository path for NeoForge).
+    fn local_maven_subdir(&self) -> &'static str {
+        match self {
+            Self::Forge => "maven.minecraftforge.net",
+            Self::NeoForge => "maven.neoforged.net/releases",
+        }
+    }
+
+    /// Installer URL candidates in preference order. Forge has the 1.7.10
+    /// doubled-suffix quirk; NeoForge (1.20.2+) has no such variation, so
+    /// its candidate list is always a single entry.
+    fn installer_url_candidates(&self, version: &str) -> Vec<(String, Url)> {
+        match self {
+            Self::Forge => crate::api::forge::installer_url_candidates(version),
+            Self::NeoForge => {
+                vec![(version.to_owned(), neoforge::installer_url(version))]
+            }
+        }
+    }
+}
+
+/// Local Maven-style working directory for the install pipeline. This is
+/// both where processor outputs land and the `library_directory` that
+/// modern (1.17+) Forge/NeoForge JVM args and FMLLoader resolve paths
+/// against — so it must be a single directory that also contains every
+/// downloaded loader lib.
+pub fn local_maven_dir(flavor: ForgeFlavor, cache: &Cache) -> PathBuf {
+    cache.directory().join(flavor.local_maven_subdir())
+}
 
 pub struct ForgeInstallResult {
     pub version: ForgeVersion,
@@ -41,17 +87,19 @@ pub struct ForgeInstallResult {
     pub effective_version: String,
 }
 
-/// Downloads and runs the Forge installer pipeline for `forge_version`
-/// (e.g. `"1.20.1-47.3.12"`).  The pipeline is skipped if the patched client
-/// JAR already exists in the local cache.
+/// Downloads and runs the Forge-family installer pipeline for `forge_version`
+/// (e.g. `"1.20.1-47.3.12"` for Forge, `"20.4.237"` for NeoForge).  The
+/// pipeline is skipped if the patched client JAR already exists in the
+/// local cache.
 pub async fn install(
+    flavor: ForgeFlavor,
     forge_version: &str,
     vanilla_jar: &Path,
     java_path: &Path,
     cache: &Cache,
 ) -> anyhow::Result<ForgeInstallResult> {
     let (effective_version, installer_path) = {
-        let candidates = installer_url_candidates(forge_version);
+        let candidates = flavor.installer_url_candidates(forge_version);
         let mut last_err = None;
         let mut winner = None;
         for (candidate_version, url) in candidates {
@@ -97,7 +145,8 @@ pub async fn install(
         if let Some(artifact) = &lib.downloads.artifact
             && artifact.url.is_none() {
                 let entry_name = format!("maven/{}", artifact.path.display());
-                let jar_url = FORGE_MAVEN_URL
+                let jar_url = flavor
+                    .maven_base_url()
                     .join(&artifact.path.to_string_lossy())
                     .with_context(|| {
                         format!("failed to build Forge Maven URL for: {}", lib.name)
@@ -121,7 +170,8 @@ pub async fn install(
         if lib.name.starts_with("net.minecraftforge:forge:") && lib.downloads.artifact.is_none() {
             let coord = MavenCoordinate::parse(&lib.name)
                 .with_context(|| format!("failed to parse Maven coordinate: {}", lib.name))?;
-            let jar_url = FORGE_MAVEN_URL
+            let jar_url = flavor
+                .maven_base_url()
                 .join(&coord.to_path().to_string_lossy())
                 .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
             let cache_path = cache.path_from_url(&jar_url)?;
@@ -148,7 +198,7 @@ pub async fn install(
 
     // Modern Forge (1.13+): run the processor pipeline to patch the client JAR.
     let (lib_paths, resolved_data) =
-        download_and_resolve(&install_profile, &installer_path, cache).await?;
+        download_and_resolve(flavor, &install_profile, &installer_path, cache).await?;
 
     let patched_client_jar = resolved_data
         .get(PATCHED_DATA_KEY)
@@ -168,7 +218,7 @@ pub async fn install(
             }
         }
 
-        let local_dir = local_maven_dir(cache);
+        let local_dir = local_maven_dir(flavor, cache);
         run_processors(
             &install_profile.processors,
             &resolved_data,
@@ -226,6 +276,7 @@ fn parse_installer(installer_path: &Path) -> anyhow::Result<(InstallProfile, For
 /// `lib_paths` maps Maven coordinate names to their cached JAR paths (used to
 /// look up processor JARs) and `resolved_data` maps data keys to local paths.
 async fn download_and_resolve(
+    flavor: ForgeFlavor,
     profile: &InstallProfile,
     installer_path: &Path,
     cache: &Cache,
@@ -243,7 +294,8 @@ async fn download_and_resolve(
         let path = if let Some(url) = &artifact.url {
             cache.fetch(url, Some(&artifact.sha1)).await?
         } else {
-            let jar_url = FORGE_MAVEN_URL
+            let jar_url = flavor
+                .maven_base_url()
                 .join(&artifact.path.to_string_lossy())
                 .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
             cache.path_from_url(&jar_url)?
@@ -252,7 +304,7 @@ async fn download_and_resolve(
         lib_paths.insert(lib.name.clone(), path);
     }
 
-    let local_dir = local_maven_dir(cache);
+    let local_dir = local_maven_dir(flavor, cache);
     let mut resolved: HashMap<String, PathBuf> = HashMap::new();
 
     for (key, entry) in &profile.data {
