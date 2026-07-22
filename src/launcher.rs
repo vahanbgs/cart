@@ -1,5 +1,6 @@
 mod arguments;
 mod cache;
+pub mod fabric;
 pub mod forge;
 mod instance;
 mod java;
