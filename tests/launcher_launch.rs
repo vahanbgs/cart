@@ -214,6 +214,17 @@ async fn launches_1_16_5_forge_latest() {
 
 #[tokio::test]
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
+async fn launches_1_20_1_fabric_latest() {
+    assert_launches_with_loader_cleanly(
+        "1.20.1",
+        Loader::fabric(LoaderSpec::Latest),
+        Duration::from_secs(15),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_1_7_10_forge_recommended() {
     assert_launches_with_loader_cleanly(
         "1.7.10",
