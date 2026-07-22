@@ -448,6 +448,103 @@ async fn build_command_1_20_1_forge_latest_has_expected_shape() {
     assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
 }
 
+/// 1.21.1 with `loader = "neoforge"` — NeoForge latest. Shares the
+/// modern Forge runtime (bootstraplauncher + JPMS module path +
+/// `--launchTarget forgeclient`) but the extra libs and patched client
+/// come off `maven.neoforged.net/releases` instead of Forge's maven.
+/// The `${library_directory}` template must resolve to the NeoForge
+/// local maven mirror, not Forge's — the module path is built against it.
+#[tokio::test]
+#[ignore = "warms the shared cart cache on first run; also hits NeoForge maven + processor pipeline"]
+async fn build_command_1_21_1_neoforge_latest_has_expected_shape() {
+    let game_dir = tempfile::tempdir().unwrap();
+    let instance = Instance::builder()
+        .version("1.21.1")
+        .loader(Loader::neoforge(LoaderSpec::Latest))
+        .build(game_dir.path().to_path_buf());
+
+    let launcher = Launcher::new();
+    let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
+
+    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let args: Vec<String> = command
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+
+    assert!(
+        program.contains("java"),
+        "expected bundled java runtime, got: {program}"
+    );
+    assert!(
+        args.iter()
+            .any(|a| a == "cpw.mods.bootstraplauncher.BootstrapLauncher"),
+        "expected bootstraplauncher main class in args:\n{args:#?}"
+    );
+
+    // NeoForge inherits Forge's `--launchTarget forgeclient` entrypoint
+    // for its 1.20.2+ line. If NeoForge's game-args ever fail to merge
+    // this pair into the vanilla list, BootstrapLauncher errors out
+    // with "unknown target".
+    let target_index = args
+        .iter()
+        .position(|a| a == "--launchTarget")
+        .expect("expected --launchTarget in args");
+    assert_eq!(
+        args.get(target_index + 1).map(String::as_str),
+        Some("forgeclient"),
+        "wrong launchTarget value in args:\n{args:#?}"
+    );
+
+    // JPMS module path — same shape as modern Forge. Any unresolved
+    // template here is fatal to BootstrapLauncher.
+    let module_path_index = args
+        .iter()
+        .position(|a| a == "-p")
+        .expect("expected -p (module path) in args");
+    let module_path = args
+        .get(module_path_index + 1)
+        .expect("expected module path value after -p");
+    assert!(
+        !module_path.contains("${"),
+        "unresolved template in module path: {module_path}"
+    );
+    assert!(
+        module_path.contains("bootstraplauncher"),
+        "module path missing bootstraplauncher entry:\n{module_path}"
+    );
+
+    // NeoForge libs must resolve against maven.neoforged.net, not
+    // maven.minecraftforge.net — if the flavor plumbing regresses,
+    // `${library_directory}` picks up Forge's cache subdir and the
+    // module path points at empty directories.
+    assert!(
+        module_path.contains("maven.neoforged.net"),
+        "module path missing maven.neoforged.net — flavor plumbing regression?\n{module_path}"
+    );
+
+    for var in [
+        "${classpath}",
+        "${natives_directory}",
+        "${assets_root}",
+        "${assets_index_name}",
+        "${game_directory}",
+        "${version_name}",
+        "${library_directory}",
+        "${classpath_separator}",
+    ] {
+        let leaked: Vec<&String> = args.iter().filter(|a| a.contains(var)).collect();
+        assert!(
+            leaked.is_empty(),
+            "critical template {var} left unresolved in: {leaked:#?}"
+        );
+    }
+
+    assert!(args.iter().any(|a| a == "-Xmx4G"), "missing -Xmx4G");
+    assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
+}
+
 /// 1.20.1 with `loader = "fabric"` — Fabric latest. Completely
 /// different launch shape from Forge: no processor pipeline, no
 /// client-JAR patching, no JPMS module path. The JVM boots
