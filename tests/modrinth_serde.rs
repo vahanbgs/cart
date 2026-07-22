@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use cart::api::modrinth::{DependencyType, Project, Version};
+use cart::api::modrinth::{DependencyType, Project, SearchResponse, Version};
 
 fn fixture(name: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -25,6 +25,10 @@ fn project(name: &str) -> Project {
 
 fn versions(name: &str) -> Vec<Version> {
     serde_json::from_str(&fixture(name)).unwrap_or_else(|e| panic!("versions {name}: {e}"))
+}
+
+fn search(name: &str) -> SearchResponse {
+    serde_json::from_str(&fixture(name)).unwrap_or_else(|e| panic!("search {name}: {e}"))
 }
 
 #[test]
@@ -118,4 +122,21 @@ fn missing_dependencies_field_defaults_to_empty() {
             v.version_number
         );
     }
+}
+
+/// `/v2/search` hits carry the five fields the CLI actually renders
+/// (slug, title, author, description, downloads). Modrinth returns two
+/// dozen more fields per hit — `SearchHit` intentionally ignores them,
+/// so this test also implicitly covers "the ignored ones don't fail
+/// deserialization".
+#[test]
+fn search_hits_deserialize_with_render_fields() {
+    let response = search("search_appleskin.json");
+    assert!(!response.hits.is_empty(), "no hits in fixture");
+    let first = &response.hits[0];
+    assert_eq!(first.slug, "appleskin");
+    assert_eq!(first.title, "AppleSkin");
+    assert_eq!(first.author, "squeek502");
+    assert!(!first.description.is_empty());
+    assert!(first.downloads > 0);
 }

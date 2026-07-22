@@ -27,10 +27,45 @@ pub fn versions_url(slug: &str, game_version: &str, loader: &str) -> Url {
     url
 }
 
+/// `GET /v2/search?query=<q>&facets=[["project_type:mod"]]&limit=<n>` —
+/// the mod-typed subset of Modrinth's global project search. Used by
+/// `cart modrinth search`. Facets are always narrowed to `project_type:mod`
+/// so we don't surface shader/resource-pack/modpack hits from a bare
+/// mod-name query.
+pub fn search_url(query: &str, limit: u32) -> Url {
+    let mut url = BASE_URL.join("v2/search").unwrap();
+    url.query_pairs_mut()
+        .append_pair("query", query)
+        .append_pair("facets", r#"[["project_type:mod"]]"#)
+        .append_pair("limit", &limit.to_string());
+    url
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Project {
     pub slug: String,
     pub title: String,
+}
+
+/// One page of `/v2/search` results. The API also returns `offset`,
+/// `limit`, and `total_hits` — cart doesn't paginate today, so only
+/// `hits` is decoded.
+#[derive(Debug, Deserialize)]
+pub struct SearchResponse {
+    pub hits: Vec<SearchHit>,
+}
+
+/// One search-page entry. Slimmed to what the CLI renders — Modrinth
+/// returns two dozen extra fields (categories, icon URL, gallery,
+/// license, per-loader compat, colours) that aren't shown, so decoding
+/// them costs allocations for no gain.
+#[derive(Debug, Deserialize)]
+pub struct SearchHit {
+    pub slug: String,
+    pub title: String,
+    pub author: String,
+    pub description: String,
+    pub downloads: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,4 +168,17 @@ pub async fn resolve(
         file,
         dependencies: picked.dependencies,
     })
+}
+
+/// Full-text mod search, capped at `limit` hits. Ordering is Modrinth's
+/// default (server-computed relevance).
+pub async fn search(http: &Client, query: &str, limit: u32) -> anyhow::Result<Vec<SearchHit>> {
+    let response: SearchResponse = http
+        .get(search_url(query, limit))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(response.hits)
 }
