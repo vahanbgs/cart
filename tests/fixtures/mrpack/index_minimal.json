@@ -1,0 +1,28 @@
+{
+  "formatVersion": 1,
+  "game": "minecraft",
+  "versionId": "1.0.0",
+  "name": "hand-built",
+  "summary": "test fixture",
+  "files": [
+    {
+      "path": "mods/example.jar",
+      "hashes": {
+        "sha1": "aabbccddeeff00112233445566778899aabbccdd",
+        "sha512": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "env": {
+        "client": "required",
+        "server": "optional"
+      },
+      "downloads": [
+        "https://example.com/example.jar"
+      ],
+      "fileSize": 1234
+    }
+  ],
+  "dependencies": {
+    "minecraft": "1.20.1",
+    "forge": "47.2.0"
+  }
+}

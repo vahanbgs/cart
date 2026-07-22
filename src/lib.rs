@@ -1,4 +1,5 @@
 pub mod api;
+pub mod export;
 mod launcher;
 
 pub use launcher::{Instance, Launcher, Loader, LoaderKind, LoaderSpec, ModCache};
