@@ -1,26 +1,15 @@
 use std::fmt::{self, Display, Formatter};
 
 use cart::api::modrinth;
-use clap::{Args, Subcommand};
 use inquire::Select;
 use reqwest::Client;
 
 use crate::{config::Config, manifest};
 
-use super::Cli;
-
-#[derive(Args)]
-pub struct Modrinth {
-    #[command(subcommand)]
-    pub command: ModrinthCommand,
-}
-
-#[derive(Subcommand)]
-pub enum ModrinthCommand {
-    Add(Add),
-    Search(Search),
-    Find(Find),
-}
+use super::{
+    Cli, Modrinth, ModrinthCommand,
+    args::modrinth::{Add, Find, Search},
+};
 
 impl Modrinth {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
@@ -30,26 +19,6 @@ impl Modrinth {
             ModrinthCommand::Find(find) => find.run(cli).await,
         }
     }
-}
-
-#[derive(Args)]
-pub struct Add {
-    /// Modrinth project slug.
-    pub slug: String,
-
-    /// Pin to a specific Modrinth `version_number` string. Default:
-    /// newest version compatible with the manifest's Minecraft version
-    /// and loader.
-    #[arg(long)]
-    pub version: Option<String>,
-
-    /// Key to use under `[mods]` in `cart.toml`. Default: the slug.
-    #[arg(long)]
-    pub name: Option<String>,
-
-    /// Add the mod already disabled (placed as `<name>.jar.disabled`).
-    #[arg(long)]
-    pub disabled: bool,
 }
 
 impl Add {
@@ -107,17 +76,6 @@ impl Add {
     }
 }
 
-#[derive(Args)]
-pub struct Search {
-    /// Free-text query. Passed verbatim to Modrinth's `/v2/search`.
-    pub query: String,
-
-    /// Maximum number of results to print. Modrinth returns at most 100
-    /// per page; cart doesn't paginate.
-    #[arg(long, default_value_t = 10)]
-    pub limit: u32,
-}
-
 impl Search {
     pub async fn run(&self, _cli: &Cli) -> anyhow::Result<()> {
         let http = Client::new();
@@ -148,23 +106,6 @@ impl Search {
 
         Ok(())
     }
-}
-
-#[derive(Args)]
-pub struct Find {
-    /// Free-text query. Passed to Modrinth's `/v2/search`; you then
-    /// pick from the results to add to `[mods]`. To just browse without
-    /// adding, use `mr search` instead.
-    pub query: String,
-
-    /// Maximum number of results to offer in the picker.
-    #[arg(long, default_value_t = 10)]
-    pub limit: u32,
-
-    /// Add the chosen mod already disabled (placed as
-    /// `<name>.jar.disabled`).
-    #[arg(long)]
-    pub disabled: bool,
 }
 
 impl Find {

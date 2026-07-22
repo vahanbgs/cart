@@ -5,7 +5,6 @@ use cart::{
     Launcher,
     api::{curseforge, modrinth},
 };
-use clap::Args;
 use reqwest::Client;
 use tokio::{fs, io};
 use url::Url;
@@ -19,15 +18,12 @@ use crate::{
 /// requires `x-api-key`; a missing/invalid key means an unavoidable 403.
 const CURSEFORGE_API_KEY_ENV: &str = "CURSEFORGE_API_KEY";
 
-use super::Cli;
+use super::{Build, Cli};
 
 /// Name of the source directory (next to `cart.toml`) whose contents mirror
 /// the `.minecraft/` layout and are replicated into the game directory on
 /// every build.
 const SOURCE_DIR: &str = "src";
-
-#[derive(Args)]
-pub struct Build;
 
 impl Build {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {

@@ -5,7 +5,7 @@ edition = "2024"
 build = "build.rs"
 
 [build-dependencies]
-clap = "4.6.2"
+clap = { version = "4.6.2", features = ["derive"] }
 clap_complete = "4.6"
 clap_complete_nushell = "4.6"
 

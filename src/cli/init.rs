@@ -1,6 +1,6 @@
 use std::{
     fmt::{self, Display},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use anyhow::Context;
@@ -11,7 +11,6 @@ use cart::api::{
     neoforge::MavenMetadata,
     piston::{Kind, VersionManifest},
 };
-use clap::Args;
 use inquire::Select;
 use reqwest::Client;
 use tokio::fs;
@@ -19,12 +18,7 @@ use toml_edit::{DocumentMut, Item, Table, value};
 
 use crate::manifest;
 
-use super::Cli;
-
-#[derive(Args)]
-pub struct Init {
-    pub path: PathBuf,
-}
+use super::{Cli, Init};
 
 /// Menu options for the loader picker. Ordered Fabric → NeoForge → Forge →
 /// Vanilla: the arrow keys default to the first entry and someone reaching

@@ -1,14 +1,6 @@
-use clap::Args;
-
 use crate::{config::Config, manifest};
 
-use super::Cli;
-
-#[derive(Args)]
-pub struct Disable {
-    /// Name of the mod as it appears under `[mods]` in `cart.toml`.
-    pub name: String,
-}
+use super::{Cli, Disable};
 
 impl Disable {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {

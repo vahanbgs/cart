@@ -1,23 +1,15 @@
 use anyhow::{Context, anyhow};
 use cart::api::{curseforge, modrinth};
-use clap::Args;
 use reqwest::Client;
 use toml_edit::DocumentMut;
 
 use crate::{config::Config, manifest, manifest::ModDependency};
 
-use super::Cli;
+use super::{Cli, Update};
 
 /// Env var holding the CurseForge API key. Only read if the manifest
 /// has at least one CurseForge entry among the update targets.
 const CURSEFORGE_API_KEY_ENV: &str = "CURSEFORGE_API_KEY";
-
-#[derive(Args)]
-pub struct Update {
-    /// Update only these mods. If empty, updates every Modrinth or
-    /// CurseForge entry in the manifest. URL entries are always skipped.
-    pub names: Vec<String>,
-}
 
 impl Update {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {

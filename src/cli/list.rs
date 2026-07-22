@@ -1,11 +1,6 @@
-use clap::Args;
-
 use crate::{config::Config, manifest::ModDependency};
 
-use super::Cli;
-
-#[derive(Args)]
-pub struct List;
+use super::{Cli, List};
 
 impl List {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {

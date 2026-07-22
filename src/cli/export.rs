@@ -12,35 +12,12 @@ use cart::{
         prism::{self, PrismPack},
     },
 };
-use clap::{Args, ValueEnum};
 use reqwest::Client;
 use tokio::fs;
 
 use crate::{cli::build, config::Config, manifest::ModDependency};
 
-use super::Cli;
-
-#[derive(Args)]
-pub struct Export {
-    /// Target format. `mrpack` for Modrinth, `curseforge` for a
-    /// CurseForge modpack zip, `prism` for a Prism/MultiMC instance
-    /// zip.
-    #[arg(value_enum)]
-    pub format: Format,
-
-    /// Destination path. Default: `<name>-<version>.<ext>` in the
-    /// current directory, where `name` and `version` come from
-    /// `cart.toml` and `ext` is picked by format.
-    #[arg(short = 'o', long)]
-    pub output: Option<PathBuf>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum Format {
-    Mrpack,
-    Curseforge,
-    Prism,
-}
+use super::{Cli, Export, Format};
 
 impl Format {
     /// File extension the format is conventionally distributed with.

@@ -2,30 +2,19 @@ use std::fmt::{self, Display, Formatter};
 
 use anyhow::Context;
 use cart::api::curseforge;
-use clap::{Args, Subcommand};
 use inquire::Select;
 use reqwest::Client;
 
 use crate::{config::Config, manifest};
 
-use super::Cli;
+use super::{
+    Cli, Curseforge, CurseforgeCommand,
+    args::curseforge::{Add, Find, Search},
+};
 
 /// Env var holding the CurseForge API key. Only read when a CurseForge
 /// subcommand actually runs — the Modrinth tree never touches it.
 const CURSEFORGE_API_KEY_ENV: &str = "CURSEFORGE_API_KEY";
-
-#[derive(Args)]
-pub struct Curseforge {
-    #[command(subcommand)]
-    pub command: CurseforgeCommand,
-}
-
-#[derive(Subcommand)]
-pub enum CurseforgeCommand {
-    Add(Add),
-    Search(Search),
-    Find(Find),
-}
 
 impl Curseforge {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
@@ -47,25 +36,6 @@ fn cf_client() -> anyhow::Result<Client> {
         )
     })?;
     curseforge::client(&key)
-}
-
-#[derive(Args)]
-pub struct Add {
-    /// CurseForge project slug.
-    pub slug: String,
-
-    /// Pin to a specific numeric CurseForge file id. Default: newest
-    /// file compatible with the manifest's Minecraft version and loader.
-    #[arg(long)]
-    pub version: Option<String>,
-
-    /// Key to use under `[mods]` in `cart.toml`. Default: the slug.
-    #[arg(long)]
-    pub name: Option<String>,
-
-    /// Add the mod already disabled (placed as `<name>.jar.disabled`).
-    #[arg(long)]
-    pub disabled: bool,
 }
 
 impl Add {
@@ -116,17 +86,6 @@ impl Add {
     }
 }
 
-#[derive(Args)]
-pub struct Search {
-    /// Free-text query. Passed verbatim to CurseForge's `/v1/mods/search`.
-    pub query: String,
-
-    /// Maximum number of results to print. CurseForge's `pageSize`
-    /// cap is 50; cart doesn't paginate.
-    #[arg(long, default_value_t = 10)]
-    pub limit: u32,
-}
-
 impl Search {
     pub async fn run(&self, _cli: &Cli) -> anyhow::Result<()> {
         let http = cf_client()?;
@@ -159,23 +118,6 @@ impl Search {
 
         Ok(())
     }
-}
-
-#[derive(Args)]
-pub struct Find {
-    /// Free-text query. Passed to CurseForge's `/v1/mods/search`; you
-    /// then pick from the results to add to `[mods]`. To just browse
-    /// without adding, use `cf search` instead.
-    pub query: String,
-
-    /// Maximum number of results to offer in the picker.
-    #[arg(long, default_value_t = 10)]
-    pub limit: u32,
-
-    /// Add the chosen mod already disabled (placed as
-    /// `<name>.jar.disabled`).
-    #[arg(long)]
-    pub disabled: bool,
 }
 
 impl Find {

@@ -1,15 +1,8 @@
 use cart::{Instance, Launcher};
-use clap::Args;
 
 use crate::config::Config;
 
-use super::{Build, Cli};
-
-#[derive(Args)]
-pub struct Run {
-    #[clap(flatten)]
-    build: Build,
-}
+use super::{Cli, Run};
 
 impl Run {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
