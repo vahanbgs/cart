@@ -30,7 +30,7 @@ cargo run -- export <format>          # package pack as mrpack / curseforge / pr
 cargo run -- remove <name>            # remove a mod from [mods]
 cargo run -- enable <name>            # flip the `disabled` flag off
 cargo run -- disable <name>           # flip the `disabled` flag on
-cargo run -- update [names...]        # re-resolve Modrinth entries; rewrite pinned version
+cargo run -- update [names...]        # re-resolve Modrinth + CurseForge entries; rewrite pinned version/file
 cargo run -- list                     # print [mods] as a table
 cargo run -- build                    # download mods into minecraft/mods/, mirror src/
 cargo run -- run                      # build + launch Minecraft
