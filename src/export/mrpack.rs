@@ -12,7 +12,9 @@
 //! serialization, so the JSON we emit reads the way a human familiar
 //! with mrpacks expects.
 
-use anyhow::bail;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::{Loader, LoaderKind, LoaderSpec};
@@ -75,7 +77,7 @@ pub struct Hashes {
     pub sha512: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Env {
     pub client: EnvValue,
     pub server: EnvValue,
@@ -124,6 +126,120 @@ pub fn dependencies_from(
     }
 
     Ok(deps)
+}
+
+/// Where a `[mods]` entry came from in cart.toml. Drives the routing
+/// decision in [`build_entry`] — Modrinth and URL entries land in the
+/// index's `files[]`; CurseForge entries are embedded as overrides so
+/// the pack works even when the CF author has restricted third-party
+/// downloads (in which case there's no URL Modrinth's ecosystem could
+/// legally fetch from anyway).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModSource {
+    Modrinth,
+    Url,
+    CurseForge,
+}
+
+/// One mod after cart's per-source resolution: the source, the filename
+/// to write into the pack, the local cached jar to read for hashing,
+/// and the download URL if there is one. The CLI fills this in from
+/// `manifest.mods` + API lookups; the routing here does no I/O beyond
+/// reading the cached jar.
+pub struct ResolvedMod<'a> {
+    pub source: ModSource,
+    pub filename: &'a str,
+    pub cached_jar: &'a Path,
+    /// `Some` for Modrinth (CDN URL) and URL entries. `Some`/`None`
+    /// for CurseForge (`None` when the author disabled third-party API
+    /// downloads).
+    pub download_url: Option<&'a str>,
+}
+
+/// The routing decision for one mod. Callers pattern-match to either
+/// push a `PackFile` into `PackIndex::files` or copy `source` into the
+/// zip at `dest`.
+#[derive(Debug)]
+pub enum PackEntry {
+    File(PackFile),
+    Override {
+        source: PathBuf,
+        /// Full in-zip path — always under `overrides/`.
+        dest: String,
+    },
+}
+
+/// Decide where one mod lands in the exported pack.
+///
+/// * Modrinth / URL → `PackFile` (URL + hashes + size).
+/// * CurseForge with a download URL → override (embed the jar; the CF
+///   URL isn't on Modrinth's allowlist for `files[]`).
+/// * CurseForge without a download URL → error naming the mod, so the
+///   user can either remove it or swap to a redistributable source.
+pub fn build_entry(m: &ResolvedMod<'_>) -> anyhow::Result<PackEntry> {
+    match m.source {
+        ModSource::Modrinth | ModSource::Url => {
+            let url = m.download_url.with_context(|| {
+                format!(
+                    "mod '{}' has no download URL; cart can't put it in an mrpack",
+                    m.filename
+                )
+            })?;
+            let file = pack_file_from(url, m.cached_jar, m.filename)?;
+            Ok(PackEntry::File(file))
+        }
+        ModSource::CurseForge => {
+            m.download_url.with_context(|| format!(
+                "CurseForge mod '{}' has no third-party download URL — the author \
+                 disabled API redistribution. Can't include this mod in an mrpack; \
+                 remove it from cart.toml or replace it with the Modrinth equivalent.",
+                m.filename
+            ))?;
+            Ok(PackEntry::Override {
+                source: m.cached_jar.to_owned(),
+                dest: format!("overrides/mods/{}", m.filename),
+            })
+        }
+    }
+}
+
+/// Build a `PackFile` for one mod. Reads the cached jar to compute
+/// SHA-1 and SHA-512 — mrpack requires both. Private because callers
+/// should go through [`build_entry`] so the source routing stays in
+/// one place.
+fn pack_file_from(url: &str, jar: &Path, filename: &str) -> anyhow::Result<PackFile> {
+    let bytes = std::fs::read(jar)
+        .with_context(|| format!("read cached jar {}", jar.display()))?;
+    let sha1 = sha1_hex(&bytes);
+    let sha512 = sha512_hex(&bytes);
+    Ok(PackFile {
+        path: format!("mods/{filename}"),
+        hashes: Hashes { sha1, sha512 },
+        // Every cart-managed mod is client-required; server-required
+        // is a stronger claim than we have any way to verify from
+        // cart.toml alone, so keep it optional. Users editing the
+        // exported pack can strengthen it downstream.
+        env: Some(Env {
+            client: EnvValue::Required,
+            server: EnvValue::Optional,
+        }),
+        downloads: vec![url.to_owned()],
+        file_size: bytes.len() as u64,
+    })
+}
+
+fn sha1_hex(bytes: &[u8]) -> String {
+    use sha1::{Digest, Sha1};
+    let mut h = Sha1::new();
+    h.update(bytes);
+    hex::encode(h.finalize())
+}
+
+fn sha512_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha512};
+    let mut h = Sha512::new();
+    h.update(bytes);
+    hex::encode(h.finalize())
 }
 
 #[cfg(test)]
@@ -238,5 +354,128 @@ mod tests {
         });
 
         assert_eq!(actual.trim_end(), expected.trim_end());
+    }
+
+    // ── File-entry assembly ───────────────────────────────────────────
+
+    /// FIPS 180-4 reference vector: SHA-512("abc"). If this ever fails,
+    /// either the sha2 crate is broken or hex encoding got swapped for
+    /// something exotic — both are catastrophic.
+    #[test]
+    fn sha512_hex_of_abc_matches_fips_vector() {
+        assert_eq!(
+            sha512_hex(b"abc"),
+            "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
+        );
+    }
+
+    /// End-to-end for the pure helper: a tempfile with known bytes
+    /// produces a `PackFile` with the FIPS hashes, the byte length as
+    /// `fileSize`, the `mods/` path convention, and the URL passed
+    /// straight through.
+    #[test]
+    fn pack_file_from_reads_hashes_and_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let jar = dir.path().join("example.jar");
+        std::fs::write(&jar, b"abc").unwrap();
+
+        let file = pack_file_from("https://example.com/example.jar", &jar, "example.jar")
+            .unwrap();
+
+        assert_eq!(file.path, "mods/example.jar");
+        assert_eq!(file.file_size, 3);
+        assert_eq!(file.hashes.sha1, "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(
+            file.hashes.sha512,
+            "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
+        );
+        assert_eq!(file.downloads, vec!["https://example.com/example.jar"]);
+        assert_eq!(
+            file.env,
+            Some(Env {
+                client: EnvValue::Required,
+                server: EnvValue::Optional
+            })
+        );
+    }
+
+    fn write_tempjar(content: &[u8]) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let jar = dir.path().join("mod.jar");
+        std::fs::write(&jar, content).unwrap();
+        (dir, jar)
+    }
+
+    #[test]
+    fn build_entry_modrinth_goes_to_files() {
+        let (_dir, jar) = write_tempjar(b"abc");
+        let m = ResolvedMod {
+            source: ModSource::Modrinth,
+            filename: "mod.jar",
+            cached_jar: &jar,
+            download_url: Some("https://cdn.modrinth.com/data/xxx/mod.jar"),
+        };
+        match build_entry(&m).unwrap() {
+            PackEntry::File(f) => {
+                assert_eq!(f.downloads, vec!["https://cdn.modrinth.com/data/xxx/mod.jar"]);
+                assert_eq!(f.path, "mods/mod.jar");
+            }
+            PackEntry::Override { .. } => panic!("Modrinth entry should go in files[]"),
+        }
+    }
+
+    #[test]
+    fn build_entry_url_goes_to_files() {
+        let (_dir, jar) = write_tempjar(b"abc");
+        let m = ResolvedMod {
+            source: ModSource::Url,
+            filename: "mod.jar",
+            cached_jar: &jar,
+            download_url: Some("https://example.com/mod.jar"),
+        };
+        match build_entry(&m).unwrap() {
+            PackEntry::File(f) => {
+                assert_eq!(f.downloads, vec!["https://example.com/mod.jar"]);
+            }
+            PackEntry::Override { .. } => panic!("URL entry should go in files[]"),
+        }
+    }
+
+    /// CF mods with a download URL are still routed to overrides —
+    /// Modrinth's `files[]` allowlist doesn't include CF's CDN in
+    /// general, so bundling the jar is the safe default.
+    #[test]
+    fn build_entry_curseforge_with_url_goes_to_overrides() {
+        let (_dir, jar) = write_tempjar(b"abc");
+        let m = ResolvedMod {
+            source: ModSource::CurseForge,
+            filename: "mod.jar",
+            cached_jar: &jar,
+            download_url: Some("https://mediafilez.forgecdn.net/files/xxx/mod.jar"),
+        };
+        match build_entry(&m).unwrap() {
+            PackEntry::Override { source, dest } => {
+                assert_eq!(source, jar);
+                assert_eq!(dest, "overrides/mods/mod.jar");
+            }
+            PackEntry::File(_) => panic!("CF entry should go in overrides"),
+        }
+    }
+
+    /// The error must name the mod so the user knows which manifest
+    /// entry to remove or swap, and mention CurseForge so the cause is
+    /// obvious.
+    #[test]
+    fn build_entry_curseforge_without_url_errors_with_hint() {
+        let (_dir, jar) = write_tempjar(b"abc");
+        let m = ResolvedMod {
+            source: ModSource::CurseForge,
+            filename: "picky-mod.jar",
+            cached_jar: &jar,
+            download_url: None,
+        };
+        let err = build_entry(&m).unwrap_err().to_string();
+        assert!(err.contains("picky-mod.jar"), "expected filename in error: {err}");
+        assert!(err.contains("CurseForge"), "expected CurseForge in error: {err}");
     }
 }
