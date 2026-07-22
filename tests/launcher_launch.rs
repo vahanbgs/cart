@@ -6,14 +6,17 @@
 //! ordering bugs, missing natives, wrong Java major, unresolved
 //! templates that MC can't tolerate.
 //!
-//! Requires a display. Under this project's Nix devshell run with:
-//!     xvfb-run cargo test --test launcher_launch -- --ignored
-//! Or against your real X server (opens a real MC window):
-//!     cargo test --test launcher_launch -- --ignored
+//! Requires a real display — MC opens actual game windows. Serialize
+//! with `--test-threads=1` unless you enjoy 16 MC windows fighting for
+//! focus at once:
+//!     cargo test --test launcher_launch -- --ignored --test-threads=1
 //!
-//! Under Xvfb specifically, LWJGL may need a software GL fallback:
-//!     LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -s "-screen 0 1024x768x24" \
-//!         cargo test --test launcher_launch -- --ignored
+//! Do NOT try to run these under Xvfb, Wayland-headless shims, VNC, or
+//! any other virtual display — LWJGL/GLFW's interaction with real
+//! graphics stacks is fragile and the failure modes (software GL
+//! fallback, missing extensions, GLX version mismatches) look like
+//! cart bugs but aren't. If you can't launch MC visually on the
+//! machine, skip these tests.
 //!
 //! Pass condition ladder:
 //! 1. Fast path — the `LWJGL Version` substring appears in

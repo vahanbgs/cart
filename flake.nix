@@ -46,7 +46,6 @@
             rustc
             rustfmt
             rust-analyzer
-            xvfb
           ];
         };
       }

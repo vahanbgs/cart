@@ -88,3 +88,13 @@ wip = { modrinth = "some-mod", disabled = true }           # placed as wip.jar.d
 ```
 
 The game directory is always `<manifest_dir>/minecraft/`; mods are placed in `<manifest_dir>/minecraft/mods/`. A sibling `<manifest_dir>/src/` directory, if present, is copied on top of `minecraft/` on every build — top-level jars under `src/mods/` are rejected (mods must be declared in `[mods]`).
+
+## Testing
+
+Default `cargo test` is fully offline: serde/manifest/loader/export tests only, no cache touched. `#[ignore]`d integration tests live under `tests/`:
+
+- `tests/launcher_command.rs` — assembles the launch `Command` for many MC/loader combos and asserts its shape. Downloads Piston/Java/Forge into a per-test-binary temp cache (via `tests/common::cache_dir()`), so behavior is independent of `~/.cache/cart/`. Run with `cargo test --test launcher_command -- --ignored`.
+- `tests/launcher_launch.rs` — actually spawns MC on the real display. Same per-binary temp cache. Run with `cargo test --test launcher_launch -- --ignored --test-threads=1`.
+- `tests/live_fetch.rs` — hits real Piston/Modrinth/CurseForge APIs to detect fixture drift. Run with `cargo test --test live_fetch -- --ignored`.
+
+Do NOT try to run the launch suite under Xvfb, VNC, or any other virtual/headless display shim — LWJGL/GLFW's interaction with real graphics stacks is fragile and virtual displays produce confusing failures that look like cart bugs but aren't. If you can't launch MC visually on the machine, skip the launch suite entirely.
