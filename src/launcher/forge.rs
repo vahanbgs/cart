@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
-use tokio::{fs, process::Command};
+use tokio::{fs, process::Command, sync::Mutex};
 use url::Url;
 use zip::ZipArchive;
 
@@ -87,6 +87,16 @@ pub struct ForgeInstallResult {
     pub effective_version: String,
 }
 
+/// Process-wide lock serializing every Forge-family install. The pipeline
+/// shells out to Java processors (SpecialSource, installertools, etc.) that
+/// read and write intermediate files keyed by Minecraft version — e.g.
+/// `client-<mc>-slim.jar` — so two concurrent installs for different Forge
+/// versions of the same MC race on those shared paths and one subprocess
+/// exits non-zero. Serializing is the correctness fix; real users typically
+/// run a single `cart build` at a time, so the perf cost is confined to
+/// parallel test suites.
+static INSTALL_LOCK: Mutex<()> = Mutex::const_new(());
+
 /// Downloads and runs the Forge-family installer pipeline for `forge_version`
 /// (e.g. `"1.20.1-47.3.12"` for Forge, `"20.4.237"` for NeoForge).  The
 /// pipeline is skipped if the patched client JAR already exists in the
@@ -98,6 +108,8 @@ pub async fn install(
     java_path: &Path,
     cache: &Cache,
 ) -> anyhow::Result<ForgeInstallResult> {
+    let _install_guard = INSTALL_LOCK.lock().await;
+
     let (effective_version, installer_path) = {
         let candidates = flavor.installer_url_candidates(forge_version);
         let mut last_err = None;
