@@ -2,6 +2,7 @@ pub mod curseforge;
 pub mod fabric;
 pub mod forge;
 pub mod modrinth;
+pub mod neoforge;
 pub mod piston;
 
 use url::Url;
