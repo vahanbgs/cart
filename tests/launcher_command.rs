@@ -448,6 +448,92 @@ async fn build_command_1_20_1_forge_latest_has_expected_shape() {
     assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
 }
 
+/// 1.20.1 with `loader = "fabric"` — Fabric latest. Completely
+/// different launch shape from Forge: no processor pipeline, no
+/// client-JAR patching, no JPMS module path. The JVM boots
+/// `KnotClient` (Fabric's main entry) with a `-DFabricMcEmu=` JVM
+/// property that Fabric uses to remember what vanilla's main would
+/// have been. Extra libs come from the Fabric profile JSON and are
+/// hosted on `maven.fabricmc.net`.
+#[tokio::test]
+#[ignore = "warms the shared cart cache on first run; also hits fabricmc meta"]
+async fn build_command_1_20_1_fabric_latest_has_expected_shape() {
+    let game_dir = tempfile::tempdir().unwrap();
+    let instance = Instance::builder()
+        .version("1.20.1")
+        .loader(Loader::fabric(LoaderSpec::Latest))
+        .build(game_dir.path().to_path_buf());
+
+    let launcher = Launcher::new();
+    let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
+
+    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let args: Vec<String> = command
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+
+    assert!(
+        program.contains("java"),
+        "expected bundled java runtime, got: {program}"
+    );
+
+    // KnotClient replaces vanilla's Main entirely. If dispatch ever
+    // regresses to vanilla-with-fabric-libs-tacked-on, KnotClient
+    // won't boot and mods never load.
+    assert!(
+        args.iter()
+            .any(|a| a == "net.fabricmc.loader.impl.launch.knot.KnotClient"),
+        "expected KnotClient main class in args:\n{args:#?}"
+    );
+    assert!(
+        !args.iter().any(|a| a == "net.minecraft.client.main.Main"),
+        "vanilla Main class should be replaced by KnotClient:\n{args:#?}"
+    );
+
+    // Fabric's JVM args carry `-DFabricMcEmu= net.minecraft.client.main.Main `
+    // — the trailing space is intentional and part of the Fabric contract
+    // (KnotClient parses it as the "emulated" main class name). If this
+    // arg gets dropped, KnotClient panics on startup.
+    assert!(
+        args.iter().any(|a| a.starts_with("-DFabricMcEmu=")),
+        "missing -DFabricMcEmu JVM property:\n{args:#?}"
+    );
+
+    for var in [
+        "${classpath}",
+        "${natives_directory}",
+        "${assets_root}",
+        "${assets_index_name}",
+        "${game_directory}",
+        "${version_name}",
+    ] {
+        let leaked: Vec<&String> = args.iter().filter(|a| a.contains(var)).collect();
+        assert!(
+            leaked.is_empty(),
+            "critical template {var} left unresolved in: {leaked:#?}"
+        );
+    }
+
+    // Fabric ships `fabric-loader` on the classpath. Its presence pins
+    // that the profile's libraries actually got fetched and merged in.
+    let classpath_index = args
+        .iter()
+        .position(|a| a == "-cp")
+        .expect("expected -cp in args");
+    let classpath = args
+        .get(classpath_index + 1)
+        .expect("expected classpath value after -cp");
+    assert!(
+        classpath.contains("fabric-loader"),
+        "no fabric-loader entry on classpath — Fabric libs missing?\n{classpath}"
+    );
+
+    assert!(args.iter().any(|a| a == "-Xmx4G"), "missing -Xmx4G");
+    assert!(args.iter().any(|a| a == "-Xms1G"), "missing -Xms1G");
+}
+
 /// 1.16.5 with `forge = "recommended"` — middle-era Forge. Uses
 /// `cpw.mods.modlauncher.Launcher` (the predecessor to
 /// bootstraplauncher — no JPMS module path yet) and Forge's launch
