@@ -1,5 +1,8 @@
+use std::fmt::{self, Display, Formatter};
+
 use cart::api::modrinth;
 use clap::{Args, Subcommand};
+use inquire::Select;
 use reqwest::Client;
 
 use crate::{config::Config, manifest};
@@ -16,6 +19,7 @@ pub struct Modrinth {
 pub enum ModrinthCommand {
     Add(Add),
     Search(Search),
+    Find(Find),
 }
 
 impl Modrinth {
@@ -23,6 +27,7 @@ impl Modrinth {
         match &self.command {
             ModrinthCommand::Add(add) => add.run(cli).await,
             ModrinthCommand::Search(search) => search.run(cli).await,
+            ModrinthCommand::Find(find) => find.run(cli).await,
         }
     }
 }
@@ -142,6 +147,102 @@ impl Search {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Args)]
+pub struct Find {
+    /// Free-text query. Passed to Modrinth's `/v2/search`; you then
+    /// pick from the results to add to `[mods]`. To just browse without
+    /// adding, use `mr search` instead.
+    pub query: String,
+
+    /// Maximum number of results to offer in the picker.
+    #[arg(long, default_value_t = 10)]
+    pub limit: u32,
+
+    /// Add the chosen mod already disabled (placed as
+    /// `<name>.jar.disabled`).
+    #[arg(long)]
+    pub disabled: bool,
+}
+
+impl Find {
+    pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
+        // Fail fast if there's no manifest to add to — better than
+        // spending a network round-trip and a picker interaction
+        // before finding out.
+        Config::load(cli).await?;
+
+        let http = Client::new();
+        let hits = modrinth::search(&http, &self.query, self.limit).await?;
+
+        if hits.is_empty() {
+            tracing::info!("no results for '{}'", self.query);
+            return Ok(());
+        }
+
+        let choices = HitChoice::from_hits(hits);
+
+        // inquire is blocking; keep it off the tokio runtime.
+        let page_size = self.limit.min(15) as usize;
+        let picked = tokio::task::spawn_blocking(move || {
+            Select::new("Add which mod?", choices)
+                .with_page_size(page_size)
+                .with_help_message("↑↓ navigate • type to filter • enter to select")
+                .prompt()
+        })
+        .await??;
+
+        let add = Add {
+            slug: picked.hit.slug.clone(),
+            version: None,
+            name: None,
+            disabled: self.disabled,
+        };
+        add.run(cli).await
+    }
+}
+
+/// Wraps a `SearchHit` with a pre-computed aligned Display label. inquire
+/// filters by the Display output, so pre-aligning it means users can type
+/// to narrow against slug/title/author in one string without inquire
+/// re-formatting on every keystroke.
+struct HitChoice {
+    hit: modrinth::SearchHit,
+    label: String,
+}
+
+impl HitChoice {
+    fn from_hits(hits: Vec<modrinth::SearchHit>) -> Vec<Self> {
+        let slug_width = hits.iter().map(|h| h.slug.len()).max().unwrap_or(0);
+        let title_width = hits.iter().map(|h| h.title.len()).max().unwrap_or(0);
+        let downloads_labels: Vec<String> =
+            hits.iter().map(|h| format_downloads(h.downloads)).collect();
+        let downloads_width = downloads_labels
+            .iter()
+            .map(|s| s.len())
+            .max()
+            .unwrap_or(0);
+
+        hits.into_iter()
+            .zip(downloads_labels)
+            .map(|(hit, downloads)| {
+                let description = truncate(&hit.description, 60);
+                let label = format!(
+                    "{slug:<slug_width$}  {title:<title_width$}  {downloads:>downloads_width$}  {description}",
+                    slug = hit.slug,
+                    title = hit.title,
+                );
+                HitChoice { hit, label }
+            })
+            .collect()
+    }
+}
+
+impl Display for HitChoice {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.label)
     }
 }
 
