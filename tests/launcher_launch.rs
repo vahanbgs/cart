@@ -167,6 +167,12 @@ async fn launches_1_16_5_forge_recommended() {
 
 #[tokio::test]
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
+async fn launches_1_16_5_forge_latest() {
+    assert_launches_with_forge_cleanly("1.16.5", "latest", Duration::from_secs(15)).await;
+}
+
+#[tokio::test]
+#[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_1_7_10_forge_recommended() {
     assert_launches_with_forge_cleanly("1.7.10", "recommended", Duration::from_secs(15)).await;
 }
