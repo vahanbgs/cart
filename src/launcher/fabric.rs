@@ -1,6 +1,3 @@
-// Wired into `Launcher` in the next commit; keep the linter quiet meanwhile.
-#![allow(dead_code)]
-
 //! Fabric loader install path — the moral analogue of `launcher::forge` but
 //! much smaller. Fabric has no installer JAR, no processor pipeline, and no
 //! client-JAR patching: given a `(mc, loader)` pair, the meta API hands back
@@ -21,9 +18,6 @@ use crate::api::{
 use super::{cache::Cache, LoaderSpec};
 
 pub struct FabricInstallResult {
-    /// The concrete loader version that was actually resolved. Differs from
-    /// the manifest's `LoaderSpec::Latest` after resolution.
-    pub effective_version: String,
     pub main_class: String,
     pub libraries: Vec<LibraryEntry>,
     pub game_args: Vec<Argument>,
@@ -39,6 +33,7 @@ pub async fn install(
     cache: &Cache,
 ) -> anyhow::Result<FabricInstallResult> {
     let effective_version = resolve_loader_version(spec, cache).await?;
+    tracing::info!("resolved Fabric loader for mc={mc_version} to {effective_version}");
 
     let profile: Profile = cache
         .fetch_json(&fabric::profile_url(mc_version, &effective_version), None)
@@ -73,7 +68,6 @@ pub async fn install(
     };
 
     Ok(FabricInstallResult {
-        effective_version,
         main_class: profile.main_class,
         libraries,
         game_args,

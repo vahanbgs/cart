@@ -101,58 +101,72 @@ impl Launcher {
         // ── Loader ────────────────────────────────────────────────────────────
         let mut resolved_forge_version: Option<String> = None;
         let (client_jar, forge_extra_libraries, forge_main_class, forge_game_args, forge_jvm_args) =
-            if let Some(loader) = instance.loader() {
-                match loader.kind {
-                    LoaderKind::Fabric => {
-                        anyhow::bail!(
-                            "fabric loader is not yet wired up in the launch pipeline"
-                        );
-                    }
-                    LoaderKind::Forge => {}
-                }
-                let forge_channel = match &loader.spec {
-                    LoaderSpec::Latest => "latest",
-                    LoaderSpec::Recommended => "recommended",
-                    LoaderSpec::Pinned(v) => v.as_str(),
-                };
-                let forge_version = if matches!(&loader.spec, LoaderSpec::Latest | LoaderSpec::Recommended) {
-                    let promotions = self
-                        .cache
-                        .fetch_json::<ForgePromotions>(ForgePromotions::url(), None)
-                        .await?;
-                    promotions
-                        .resolve(version_id, forge_channel)
-                        .ok_or_else(|| {
+            match instance.loader() {
+                None => (vanilla_client_jar, vec![], None, (None, vec![]), vec![]),
+                Some(loader) if loader.kind == LoaderKind::Forge => {
+                    let forge_channel = match &loader.spec {
+                        LoaderSpec::Latest => "latest",
+                        LoaderSpec::Recommended => "recommended",
+                        LoaderSpec::Pinned(v) => v.as_str(),
+                    };
+                    let forge_version = if matches!(
+                        &loader.spec,
+                        LoaderSpec::Latest | LoaderSpec::Recommended
+                    ) {
+                        let promotions = self
+                            .cache
+                            .fetch_json::<ForgePromotions>(ForgePromotions::url(), None)
+                            .await?;
+                        promotions.resolve(version_id, forge_channel).ok_or_else(|| {
                             anyhow!("no Forge {forge_channel} release for Minecraft {version_id}")
                         })?
-                } else {
-                    format!("{version_id}-{forge_channel}")
-                };
+                    } else {
+                        format!("{version_id}-{forge_channel}")
+                    };
 
-                let result =
-                    forge::install(&forge_version, &vanilla_client_jar, &java_path, &self.cache)
-                        .await?;
+                    let result = forge::install(
+                        &forge_version,
+                        &vanilla_client_jar,
+                        &java_path,
+                        &self.cache,
+                    )
+                    .await?;
 
-                let fv = result.version;
-                let game_args = fv.minecraft_arguments.clone();
-                let jvm_args = fv.arguments.jvm.clone();
-                let game_args_modern = fv.arguments.game.clone();
+                    let fv = result.version;
+                    let game_args = fv.minecraft_arguments.clone();
+                    let jvm_args = fv.arguments.jvm.clone();
+                    let game_args_modern = fv.arguments.game.clone();
 
-                let client_jar = result
-                    .patched_client_jar
-                    .unwrap_or_else(|| vanilla_client_jar.clone());
+                    let client_jar = result
+                        .patched_client_jar
+                        .unwrap_or_else(|| vanilla_client_jar.clone());
 
-                resolved_forge_version = Some(result.effective_version);
+                    resolved_forge_version = Some(result.effective_version);
 
-                (
-                    client_jar,
-                    fv.libraries,
-                    Some(fv.main_class),
-                    (game_args, game_args_modern),
-                    jvm_args,
-                )
-            } else {
-                (vanilla_client_jar, vec![], None, (None, vec![]), vec![])
+                    (
+                        client_jar,
+                        fv.libraries,
+                        Some(fv.main_class),
+                        (game_args, game_args_modern),
+                        jvm_args,
+                    )
+                }
+                Some(loader) => {
+                    // Fabric: no client-JAR patching, no legacy game-args
+                    // string. Extra libs come from the profile JSON, the
+                    // JVM boots KnotClient, and the modern game/jvm args
+                    // are merged on top of vanilla's.
+                    debug_assert!(loader.kind == LoaderKind::Fabric);
+                    let result =
+                        fabric::install(version_id, &loader.spec, &self.cache).await?;
+                    (
+                        vanilla_client_jar,
+                        result.libraries,
+                        Some(result.main_class),
+                        (None, result.game_args),
+                        result.jvm_args,
+                    )
+                }
             };
 
         let classpath = java::build_class_path(
