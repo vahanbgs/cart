@@ -50,6 +50,22 @@ pub fn installer_url(version: &str) -> Url {
         .unwrap()
 }
 
+/// Installer URL candidates in preference order, paired with the effective
+/// Forge version identifier that the winning URL implies. Most MC versions
+/// yield a single `(identifier, url)` pair. 1.7.10 gets a second candidate
+/// with a doubled `-1.7.10` suffix — Forge switched to that layout at
+/// build 10.13.4.1448 and never reverted, so the plain form 404s on the
+/// promoted "recommended" build.
+pub fn installer_url_candidates(forge_version: &str) -> Vec<(String, Url)> {
+    let mut out = vec![(forge_version.to_owned(), installer_url(forge_version))];
+    if forge_version.starts_with("1.7.10-") && !forge_version.ends_with("-1.7.10") {
+        let doubled = format!("{forge_version}-1.7.10");
+        let url = installer_url(&doubled);
+        out.push((doubled, url));
+    }
+    out
+}
+
 pub struct MavenCoordinate {
     pub group: String,
     pub artifact: String,

@@ -126,7 +126,7 @@ impl Launcher {
                     .patched_client_jar
                     .unwrap_or_else(|| vanilla_client_jar.clone());
 
-                resolved_forge_version = Some(forge_version);
+                resolved_forge_version = Some(result.effective_version);
 
                 (
                     client_jar,

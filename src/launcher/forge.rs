@@ -10,7 +10,9 @@ use tokio::{fs, process::Command};
 use url::Url;
 use zip::ZipArchive;
 
-use crate::api::forge::{ForgeVersion, InstallProfile, MavenCoordinate, Processor, installer_url};
+use crate::api::forge::{
+    ForgeVersion, InstallProfile, MavenCoordinate, Processor, installer_url_candidates,
+};
 
 /// The `data` key whose client value is the Maven coord of the patched client
 /// JAR produced by the Forge install pipeline (spec 0+).
@@ -33,6 +35,10 @@ pub struct ForgeInstallResult {
     pub version: ForgeVersion,
     /// `None` for legacy Forge (pre-1.13): use the vanilla client JAR as-is.
     pub patched_client_jar: Option<PathBuf>,
+    /// The Forge version identifier that actually resolved on the maven —
+    /// may differ from the caller's input for 1.7.10 (see
+    /// [`installer_url_candidates`] for why).
+    pub effective_version: String,
 }
 
 /// Downloads and runs the Forge installer pipeline for `forge_version`
@@ -44,7 +50,26 @@ pub async fn install(
     java_path: &Path,
     cache: &Cache,
 ) -> anyhow::Result<ForgeInstallResult> {
-    let installer_path = cache.fetch(&installer_url(forge_version), None).await?;
+    let (effective_version, installer_path) = {
+        let candidates = installer_url_candidates(forge_version);
+        let mut last_err = None;
+        let mut winner = None;
+        for (candidate_version, url) in candidates {
+            match cache.fetch(&url, None).await {
+                Ok(path) => {
+                    winner = Some((candidate_version, path));
+                    break;
+                }
+                Err(err) => last_err = Some(err),
+            }
+        }
+        winner.ok_or_else(|| {
+            let err = last_err.expect("candidates list is non-empty");
+            err.context(format!(
+                "no Forge installer at any candidate URL for {forge_version}"
+            ))
+        })?
+    };
 
     let (install_profile, forge_version_manifest) =
         parse_installer(&installer_path).context("failed to parse Forge installer")?;
@@ -52,7 +77,7 @@ pub async fn install(
     let marker = cache
         .directory()
         .join("forge")
-        .join(forge_version)
+        .join(&effective_version)
         .join(".installed");
 
     // Any library with an empty URL is bundled inside the installer
@@ -84,6 +109,29 @@ pub async fn install(
             }
     }
 
+    // Legacy Forge (1.7.10 era) bundles the Forge JAR at the root of
+    // the installer ZIP as `forge-{version}-universal.jar`, and lists
+    // it in versionInfo.libraries as `net.minecraftforge:forge:{version}`
+    // with NO `downloads` block. Forge maven publishes only the
+    // `-universal` classifier, so the standard "look it up by Maven
+    // coordinate" fallback in build_class_path would 404. Extract the
+    // universal JAR out of the installer and place it at the unclassified
+    // coordinate path, which is what the versionInfo entry resolves to.
+    for lib in &forge_version_manifest.libraries {
+        if lib.name.starts_with("net.minecraftforge:forge:") && lib.downloads.artifact.is_none() {
+            let coord = MavenCoordinate::parse(&lib.name)
+                .with_context(|| format!("failed to parse Maven coordinate: {}", lib.name))?;
+            let jar_url = FORGE_MAVEN_URL
+                .join(&coord.to_path().to_string_lossy())
+                .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
+            let cache_path = cache.path_from_url(&jar_url)?;
+            if !fs::try_exists(&cache_path).await? {
+                let entry_name = format!("forge-{effective_version}-universal.jar");
+                extract_from_installer(&installer_path, &entry_name, &cache_path)?;
+            }
+        }
+    }
+
     // Legacy Forge (no processors): no client JAR patching needed.
     if install_profile.processors.is_empty() {
         if !fs::try_exists(&marker).await? {
@@ -94,6 +142,7 @@ pub async fn install(
         return Ok(ForgeInstallResult {
             version: forge_version_manifest,
             patched_client_jar: None,
+            effective_version,
         });
     }
 
@@ -138,6 +187,7 @@ pub async fn install(
     Ok(ForgeInstallResult {
         version: forge_version_manifest,
         patched_client_jar: Some(patched_client_jar),
+        effective_version,
     })
 }
 
