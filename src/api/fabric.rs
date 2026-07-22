@@ -23,6 +23,9 @@ static BASE_URL: LazyLock<Url> =
 static LOADER_VERSIONS_URL: LazyLock<Url> =
     LazyLock::new(|| BASE_URL.join("v2/versions/loader").unwrap());
 
+static GAME_VERSIONS_URL: LazyLock<Url> =
+    LazyLock::new(|| BASE_URL.join("v2/versions/game").unwrap());
+
 /// One entry from `/v2/versions/loader`. `stable=true` marks the loader
 /// as the "stable" release channel — `LoaderSpec::Latest` picks the newest
 /// stable entry.
@@ -42,6 +45,32 @@ pub struct LoaderVersions(pub Vec<LoaderVersion>);
 impl Endpoint for LoaderVersions {
     fn url() -> &'static Url {
         &LOADER_VERSIONS_URL
+    }
+}
+
+/// One entry from `/v2/versions/game` — every Minecraft version Fabric has
+/// intermediary mappings for. Used to filter loader options in `cart init`
+/// so we don't offer Fabric for MC versions it doesn't cover.
+#[derive(Clone, Debug, Deserialize)]
+pub struct GameVersion {
+    pub version: String,
+    pub stable: bool,
+}
+
+/// The `/v2/versions/game` response — a flat list.
+#[derive(Debug, Deserialize)]
+#[serde(transparent)]
+pub struct GameVersions(pub Vec<GameVersion>);
+
+impl GameVersions {
+    pub fn contains(&self, mc_version: &str) -> bool {
+        self.0.iter().any(|v| v.version == mc_version)
+    }
+}
+
+impl Endpoint for GameVersions {
+    fn url() -> &'static Url {
+        &GAME_VERSIONS_URL
     }
 }
 

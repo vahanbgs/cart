@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use cart::api::fabric::{LoaderVersions, Profile};
+use cart::api::fabric::{GameVersions, LoaderVersions, Profile};
 
 fn fixture(name: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -41,6 +41,16 @@ fn profile_carries_main_class_and_inherits_from() {
         profile.main_class,
         "net.fabricmc.loader.impl.launch.knot.KnotClient"
     );
+}
+
+/// `contains` is the load-bearing helper `cart init` uses to decide
+/// whether Fabric belongs in the loader menu. Cover both hit and miss.
+#[test]
+fn game_versions_membership_check() {
+    let list: GameVersions = serde_json::from_str(&fixture("game_versions.json")).unwrap();
+    assert!(list.contains("1.20.1"));
+    assert!(list.contains("1.14"));
+    assert!(!list.contains("b1.7.3"));
 }
 
 /// The library shape has one subtlety: Fabric's own self-references
