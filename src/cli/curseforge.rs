@@ -1,6 +1,7 @@
 use anyhow::Context;
 use cart::api::curseforge;
 use clap::{Args, Subcommand};
+use reqwest::Client;
 
 use crate::{config::Config, manifest};
 
@@ -19,14 +20,28 @@ pub struct Curseforge {
 #[derive(Subcommand)]
 pub enum CurseforgeCommand {
     Add(Add),
+    Search(Search),
 }
 
 impl Curseforge {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         match &self.command {
             CurseforgeCommand::Add(add) => add.run(cli).await,
+            CurseforgeCommand::Search(search) => search.run(cli).await,
         }
     }
+}
+
+/// `CURSEFORGE_API_KEY` guarded read used by every CF-hitting subcommand.
+/// Same error text everywhere so users see one consistent hint.
+fn cf_client() -> anyhow::Result<Client> {
+    let key = std::env::var(CURSEFORGE_API_KEY_ENV).with_context(|| {
+        format!(
+            "cart curseforge subcommands need {CURSEFORGE_API_KEY_ENV} — get a key at \
+             https://console.curseforge.com/ and export it"
+        )
+    })?;
+    curseforge::client(&key)
 }
 
 #[derive(Args)]
@@ -60,13 +75,7 @@ impl Add {
             cart::LoaderKind::NeoForge => curseforge::LoaderType::NeoForge,
         });
 
-        let key = std::env::var(CURSEFORGE_API_KEY_ENV).with_context(|| {
-            format!(
-                "cart curseforge add needs {CURSEFORGE_API_KEY_ENV} — get a key at \
-                 https://console.curseforge.com/ and export it"
-            )
-        })?;
-        let http = curseforge::client(&key)?;
+        let http = cf_client()?;
 
         let project = curseforge::find_project_by_slug(&http, &self.slug).await?;
 
@@ -99,5 +108,74 @@ impl Add {
         );
 
         Ok(())
+    }
+}
+
+#[derive(Args)]
+pub struct Search {
+    /// Free-text query. Passed verbatim to CurseForge's `/v1/mods/search`.
+    pub query: String,
+
+    /// Maximum number of results to print. CurseForge's `pageSize`
+    /// cap is 50; cart doesn't paginate.
+    #[arg(long, default_value_t = 10)]
+    pub limit: u32,
+}
+
+impl Search {
+    pub async fn run(&self, _cli: &Cli) -> anyhow::Result<()> {
+        let http = cf_client()?;
+        let hits = curseforge::search(&http, &self.query, self.limit).await?;
+
+        if hits.is_empty() {
+            return Ok(());
+        }
+
+        let slug_width = hits.iter().map(|h| h.slug.len()).max().unwrap_or(0);
+        let name_width = hits.iter().map(|h| h.name.len()).max().unwrap_or(0);
+        let downloads_labels: Vec<String> = hits
+            .iter()
+            .map(|h| format_downloads(h.download_count))
+            .collect();
+        let downloads_width = downloads_labels
+            .iter()
+            .map(|s| s.len())
+            .max()
+            .unwrap_or(0);
+
+        for (hit, downloads) in hits.iter().zip(downloads_labels.iter()) {
+            let summary = truncate(&hit.summary, 60);
+            println!(
+                "{slug:<slug_width$}  {name:<name_width$}  {downloads:>downloads_width$}  {summary}",
+                slug = hit.slug,
+                name = hit.name,
+            );
+        }
+
+        Ok(())
+    }
+}
+
+/// Compact download counts: `77.0M`, `31.8k`, `310`. Same shape as
+/// `mr search` so both trees read the same at a glance.
+fn format_downloads(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Truncate on character boundaries — CurseForge summaries can contain
+/// multi-byte characters and a byte-based slice would panic.
+fn truncate(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_owned()
+    } else {
+        let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+        out.push('…');
+        out
     }
 }
