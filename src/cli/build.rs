@@ -64,7 +64,9 @@ impl Build {
 /// Build a CurseForge-authenticated HTTP client if the manifest has any
 /// CurseForge entries. Absent entries skip the env-var read so users
 /// without a key can still build Modrinth/URL-only packs.
-fn build_curseforge_client_if_needed(manifest: &Manifest) -> anyhow::Result<Option<Client>> {
+pub(super) fn build_curseforge_client_if_needed(
+    manifest: &Manifest,
+) -> anyhow::Result<Option<Client>> {
     let has_curseforge = manifest
         .mods
         .values()
@@ -88,7 +90,7 @@ fn build_curseforge_client_if_needed(manifest: &Manifest) -> anyhow::Result<Opti
 /// `version_number` if set, newest compatible otherwise. CurseForge entries
 /// hit the CF API for the file's `downloadUrl` (a CDN URL that itself
 /// needs no auth), which is what gets returned to the shared cache.
-async fn resolve_url(
+pub(super) async fn resolve_url(
     dep: &ModDependency,
     manifest: &Manifest,
     http: &Client,
@@ -204,7 +206,7 @@ async fn prune_stale_jars(
 /// Fail loudly if `src/mods/` contains a top-level jar (enabled or disabled).
 /// Subdirectories are fine — those may be version-specific mod folders that
 /// belong to individual mods and are none of cart's business.
-async fn reject_src_mods_jars(src_mods: &Path) -> anyhow::Result<()> {
+pub(super) async fn reject_src_mods_jars(src_mods: &Path) -> anyhow::Result<()> {
     if !fs::try_exists(src_mods).await? {
         return Ok(());
     }
