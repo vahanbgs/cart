@@ -17,8 +17,30 @@ use anyhow::bail;
 use serde::Deserialize;
 use tokio::fs;
 
+// `name`/`version`/`authors`/`summary` are only read by `cart export`,
+// added in a later phase. The `allow` disappears with the export code.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct Manifest {
+    /// Human-readable pack name. Required at export time (all three
+    /// export formats bake it in); `cart run` doesn't care.
+    pub name: Option<String>,
+
+    /// Pack version string (e.g. "1.0.0"). Required at export time —
+    /// used as `versionId` in mrpack, `version` in curseforge, and the
+    /// suggested output filename. Not validated as semver; whatever
+    /// convention the pack author picks is fine.
+    pub version: Option<String>,
+
+    /// Pack authors. Cargo-style plural even when there's one — CF's
+    /// `manifest.json` takes a single `author` string, so cart joins
+    /// with `, ` at export time when needed.
+    #[serde(default)]
+    pub authors: Vec<String>,
+
+    /// Short pack description. Optional in all three export formats.
+    pub summary: Option<String>,
+
     pub minecraft: String,
     pub loader: Option<cart::Loader>,
     pub mods: HashMap<String, ModDependency>,
@@ -89,4 +111,56 @@ mod tests {
         assert_eq!(path, manifest_path);
     }
 
+    /// The oldest cart.toml shape — only `minecraft` + `[mods]` — must
+    /// keep parsing so existing packs don't break when they land on a
+    /// cart that knows about the new export fields.
+    #[test]
+    fn parses_manifest_without_pack_fields() {
+        let toml = r#"
+minecraft = "1.20.1"
+[mods]
+"#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert!(m.name.is_none());
+        assert!(m.version.is_none());
+        assert!(m.authors.is_empty());
+        assert!(m.summary.is_none());
+        assert_eq!(m.minecraft, "1.20.1");
+    }
+
+    /// Every export-time pack field populated at once. Locks in the
+    /// spelling — a rename here would silently make every existing
+    /// exportable pack invalid.
+    #[test]
+    fn parses_manifest_with_all_pack_fields() {
+        let toml = r#"
+name = "my-pack"
+version = "1.2.3"
+authors = ["alice", "bob"]
+summary = "a demo pack"
+minecraft = "1.20.1"
+loader = { forge = "47.2.0" }
+[mods]
+"#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.name.as_deref(), Some("my-pack"));
+        assert_eq!(m.version.as_deref(), Some("1.2.3"));
+        assert_eq!(m.authors, vec!["alice", "bob"]);
+        assert_eq!(m.summary.as_deref(), Some("a demo pack"));
+    }
+
+    /// `authors` is Cargo-style plural even when only one; a bare
+    /// string (`authors = "alice"`) is a schema error and must fail
+    /// loudly rather than silently coercing.
+    #[test]
+    fn authors_bare_string_is_rejected() {
+        let toml = r#"
+name = "p"
+version = "0"
+authors = "alice"
+minecraft = "1.20.1"
+[mods]
+"#;
+        assert!(toml::from_str::<Manifest>(toml).is_err());
+    }
 }
