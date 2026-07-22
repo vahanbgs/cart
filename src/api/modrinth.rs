@@ -6,8 +6,7 @@ use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use url::Url;
 
-static BASE_URL: LazyLock<Url> =
-    LazyLock::new(|| Url::parse("https://api.modrinth.com/").unwrap());
+static BASE_URL: LazyLock<Url> = LazyLock::new(|| Url::parse("https://api.modrinth.com/").unwrap());
 
 /// `GET /v2/project/{slug}` — validates that the slug exists.
 pub fn project_url(slug: &str) -> Url {

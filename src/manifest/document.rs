@@ -166,11 +166,7 @@ pub fn set_mod_version(
 /// `set_mod_version`: errors if the entry isn't CurseForge-shaped, since
 /// writing a `file` key onto a Modrinth or URL entry would produce a
 /// hybrid that fails `ModDependency` deserialization.
-pub fn set_mod_file(
-    document: &mut DocumentMut,
-    name: &str,
-    file_id: u32,
-) -> anyhow::Result<()> {
+pub fn set_mod_file(document: &mut DocumentMut, name: &str, file_id: u32) -> anyhow::Result<()> {
     let mods = mods_table_mut(document)?;
     let entry = mods
         .get_mut(name)
@@ -269,9 +265,7 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
 
     #[test]
     fn add_appends_next_to_existing_entries() {
-        let mut doc = parse(
-            "[mods]\nmantle = { modrinth = \"mantle\", version = \"1.0\" }\n",
-        );
+        let mut doc = parse("[mods]\nmantle = { modrinth = \"mantle\", version = \"1.0\" }\n");
         add_modrinth_mod(&mut doc, "jei", "jei", "15.2.0.27", false).unwrap();
         let out = doc.to_string();
         assert!(out.contains(r#"mantle = { modrinth = "mantle", version = "1.0" }"#));
@@ -328,9 +322,7 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
         add_curseforge_mod(&mut doc, "jei", 238222, 8419086, false).unwrap();
         let out = doc.to_string();
         assert!(
-            out.contains(
-                "wip = { curseforge = 238222, file = 8419086, disabled = true }"
-            ),
+            out.contains("wip = { curseforge = 238222, file = 8419086, disabled = true }"),
             "expected disabled=true on wip:\n{out}"
         );
         assert!(
@@ -341,9 +333,7 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
 
     #[test]
     fn add_curseforge_rejects_duplicate_key() {
-        let mut doc = parse(
-            "[mods]\njei = { curseforge = 238222, file = 8419086 }\n",
-        );
+        let mut doc = parse("[mods]\njei = { curseforge = 238222, file = 8419086 }\n");
         let err = add_curseforge_mod(&mut doc, "jei", 238222, 9999999, false).unwrap_err();
         assert!(
             err.to_string().contains("already declared"),
@@ -404,9 +394,8 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
     /// `disabled = false` would leak clutter into every user's cart.toml.
     #[test]
     fn enable_removes_the_disabled_key_rather_than_writing_false() {
-        let mut doc = parse(
-            "[mods]\njei = { modrinth = \"jei\", version = \"1.0\", disabled = true }\n",
-        );
+        let mut doc =
+            parse("[mods]\njei = { modrinth = \"jei\", version = \"1.0\", disabled = true }\n");
         set_mod_disabled(&mut doc, "jei", false).unwrap();
         let out = doc.to_string();
         assert!(!out.contains("disabled"), "disabled should be gone:\n{out}");
@@ -417,9 +406,8 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
     /// `disabled = true, disabled = true` or similar duplicated state.
     #[test]
     fn disable_and_enable_are_idempotent() {
-        let mut disabled_doc = parse(
-            "[mods]\njei = { modrinth = \"jei\", version = \"1.0\", disabled = true }\n",
-        );
+        let mut disabled_doc =
+            parse("[mods]\njei = { modrinth = \"jei\", version = \"1.0\", disabled = true }\n");
         set_mod_disabled(&mut disabled_doc, "jei", true).unwrap();
         assert_eq!(disabled_doc.to_string().matches("disabled").count(), 1);
 
@@ -433,8 +421,7 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
     /// and users may hand-write it. Both mutation paths must handle it.
     #[test]
     fn disable_works_on_subtable_form() {
-        let mut doc =
-            parse("[mods.jei]\nmodrinth = \"jei\"\nversion = \"1.0\"\n");
+        let mut doc = parse("[mods.jei]\nmodrinth = \"jei\"\nversion = \"1.0\"\n");
         set_mod_disabled(&mut doc, "jei", true).unwrap();
         assert!(doc.to_string().contains("disabled = true"));
     }
@@ -459,8 +446,7 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
 
     #[test]
     fn set_version_works_on_subtable_form() {
-        let mut doc =
-            parse("[mods.jei]\nmodrinth = \"jei\"\nversion = \"1.0\"\n");
+        let mut doc = parse("[mods.jei]\nmodrinth = \"jei\"\nversion = \"1.0\"\n");
         set_mod_version(&mut doc, "jei", "2.0").unwrap();
         assert!(doc.to_string().contains(r#"version = "2.0""#));
     }
@@ -472,9 +458,7 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
     /// (neither variant would match).
     #[test]
     fn set_version_rejects_url_entries() {
-        let mut doc = parse(
-            "[mods]\ncustom = { url = \"https://example.com/jei.jar\" }\n",
-        );
+        let mut doc = parse("[mods]\ncustom = { url = \"https://example.com/jei.jar\" }\n");
         let err = set_mod_version(&mut doc, "custom", "2.0").unwrap_err();
         assert!(
             err.to_string().contains("no `modrinth` key"),
@@ -493,9 +477,7 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
 
     #[test]
     fn set_file_overwrites_on_inline_table() {
-        let mut doc = parse(
-            "[mods]\njei = { curseforge = 238222, file = 8419086 }\n",
-        );
+        let mut doc = parse("[mods]\njei = { curseforge = 238222, file = 8419086 }\n");
         set_mod_file(&mut doc, "jei", 9000000).unwrap();
         let out = doc.to_string();
         assert!(out.contains("file = 9000000"), "{out}");
@@ -504,9 +486,7 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
 
     #[test]
     fn set_file_works_on_subtable_form() {
-        let mut doc = parse(
-            "[mods.jei]\ncurseforge = 238222\nfile = 8419086\n",
-        );
+        let mut doc = parse("[mods.jei]\ncurseforge = 238222\nfile = 8419086\n");
         set_mod_file(&mut doc, "jei", 9000000).unwrap();
         assert!(doc.to_string().contains("file = 9000000"));
     }
@@ -516,9 +496,7 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
     /// — same rationale here in reverse.
     #[test]
     fn set_file_rejects_modrinth_entries() {
-        let mut doc = parse(
-            "[mods]\njei = { modrinth = \"jei\", version = \"1.0\" }\n",
-        );
+        let mut doc = parse("[mods]\njei = { modrinth = \"jei\", version = \"1.0\" }\n");
         let err = set_mod_file(&mut doc, "jei", 8419086).unwrap_err();
         assert!(
             err.to_string().contains("no `curseforge` key"),
@@ -565,10 +543,7 @@ mantle = { url = \"https://example.com/mantle.jar\" }
             r#"jei = { modrinth = "jei", version = "2.0" }"#,
             r#"appleskin = { modrinth = "appleskin", version = "2.5.1" }"#,
         ] {
-            assert!(
-                out.contains(expected),
-                "expected {expected:?} in:\n{out}"
-            );
+            assert!(out.contains(expected), "expected {expected:?} in:\n{out}");
         }
         assert!(
             out.contains("disabled = true") && out.contains("mantle"),

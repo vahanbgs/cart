@@ -174,7 +174,10 @@ async fn update_curseforge(
         tracing::info!("{name}: up to date (file {current_file_id})");
         Ok(false)
     } else {
-        tracing::info!("{name}: file {current_file_id} → {new_id}", new_id = latest.id);
+        tracing::info!(
+            "{name}: file {current_file_id} → {new_id}",
+            new_id = latest.id
+        );
         manifest::set_mod_file(document, name, latest.id)?;
         Ok(true)
     }

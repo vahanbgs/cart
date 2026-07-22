@@ -98,12 +98,7 @@ fn every_file_has_a_sha1_hash() {
         let sha1 = f
             .sha1()
             .unwrap_or_else(|| panic!("file {} has no SHA-1 hash", f.id));
-        assert_eq!(
-            sha1.len(),
-            40,
-            "file {} SHA-1 wrong length: {sha1:?}",
-            f.id
-        );
+        assert_eq!(sha1.len(), 40, "file {} SHA-1 wrong length: {sha1:?}", f.id);
         assert!(
             sha1.chars().all(|c| c.is_ascii_hexdigit()),
             "file {} SHA-1 not hex: {sha1:?}",

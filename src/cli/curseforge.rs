@@ -101,11 +101,7 @@ impl Search {
             .iter()
             .map(|h| format_downloads(h.download_count))
             .collect();
-        let downloads_width = downloads_labels
-            .iter()
-            .map(|s| s.len())
-            .max()
-            .unwrap_or(0);
+        let downloads_width = downloads_labels.iter().map(|s| s.len()).max().unwrap_or(0);
 
         for (hit, downloads) in hits.iter().zip(downloads_labels.iter()) {
             let summary = truncate(&hit.summary, 60);
@@ -171,11 +167,7 @@ impl HitChoice {
             .iter()
             .map(|h| format_downloads(h.download_count))
             .collect();
-        let downloads_width = downloads_labels
-            .iter()
-            .map(|s| s.len())
-            .max()
-            .unwrap_or(0);
+        let downloads_width = downloads_labels.iter().map(|s| s.len()).max().unwrap_or(0);
 
         hits.into_iter()
             .zip(downloads_labels)

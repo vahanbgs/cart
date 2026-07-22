@@ -66,9 +66,10 @@ pub async fn fetch_java_distribution(
 
     for (path, fs_entry) in java_distribution.files {
         if let FileSystemEntry::File {
-                downloads,
-                executable,
-            } = fs_entry {
+            downloads,
+            executable,
+        } = fs_entry
+        {
             let source_path = cache
                 .fetch(&downloads.raw.url, Some(&downloads.raw.sha1))
                 .await?;
@@ -156,25 +157,27 @@ pub async fn build_class_path(
         }
 
         if let Some(artifact) = &library_entry.downloads.artifact
-            && let Some(url) = &artifact.url {
-                let path = cache.fetch(url, Some(&artifact.sha1)).await?;
-                add_classpath_entry(
-                    &mut entries,
-                    &mut key_positions,
-                    dedup_key(&library_entry.name),
-                    path.to_string_lossy().into_owned(),
-                );
-            }
+            && let Some(url) = &artifact.url
+        {
+            let path = cache.fetch(url, Some(&artifact.sha1)).await?;
+            add_classpath_entry(
+                &mut entries,
+                &mut key_positions,
+                dedup_key(&library_entry.name),
+                path.to_string_lossy().into_owned(),
+            );
+        }
 
         if let Some(native) = &library_entry.downloads.classifiers
             && let Some(native) = native.get(&NativeClassifier::current())
-                && let Some(url) = &native.url {
-                    let jar_path = cache.fetch(url, Some(&native.sha1)).await?;
-                    let jar_file = File::open(jar_path).await?;
-                    let mut archive = ZipArchive::new(jar_file.into_std().await)?;
+            && let Some(url) = &native.url
+        {
+            let jar_path = cache.fetch(url, Some(&native.sha1)).await?;
+            let jar_file = File::open(jar_path).await?;
+            let mut archive = ZipArchive::new(jar_file.into_std().await)?;
 
-                    archive.extract(natives_directory)?;
-                }
+            archive.extract(natives_directory)?;
+        }
     }
 
     for lib in extra_libraries {

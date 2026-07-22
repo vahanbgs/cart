@@ -32,6 +32,5 @@ fn main() {
         generate_to(shell, &mut cmd, "cart", &out_dir)
             .unwrap_or_else(|e| panic!("generate {shell} completion: {e}"));
     }
-    generate_to(Nushell, &mut cmd, "cart", &out_dir)
-        .expect("generate nushell completion");
+    generate_to(Nushell, &mut cmd, "cart", &out_dir).expect("generate nushell completion");
 }

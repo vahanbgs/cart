@@ -48,11 +48,7 @@ async fn assert_launches_cleanly(version: &str, watch: Duration) {
 /// Loader variant of `assert_launches_cleanly`. Kept separate so the
 /// existing vanilla callsites don't need to grow an `Option<Loader>`
 /// argument — inline duplication is fine while the shape settles.
-async fn assert_launches_with_loader_cleanly(
-    version: &str,
-    loader: Loader,
-    watch: Duration,
-) {
+async fn assert_launches_with_loader_cleanly(version: &str, loader: Loader, watch: Duration) {
     let game_dir = tempfile::tempdir().unwrap();
     let label = format!(
         "{version}+{kind}:{spec}",

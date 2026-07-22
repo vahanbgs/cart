@@ -118,9 +118,7 @@ fn neoforge_prefix(mc_version: &str) -> Option<String> {
         Some((maj, min)) => (maj, min),
         None => (rest, "0"),
     };
-    if !major.chars().all(|c| c.is_ascii_digit())
-        || !minor.chars().all(|c| c.is_ascii_digit())
-    {
+    if !major.chars().all(|c| c.is_ascii_digit()) || !minor.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
     Some(format!("{major}.{minor}."))

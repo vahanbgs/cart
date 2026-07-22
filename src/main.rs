@@ -17,8 +17,8 @@ async fn main() -> anyhow::Result<()> {
         1 => "cart=debug",
         _ => "cart=trace",
     };
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_filter));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)

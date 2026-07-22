@@ -204,7 +204,9 @@ pub fn write_pack(
             .with_context(|| format!("write ZIP entry {dest}"))?;
     }
 
-    writer.finish().context("finalize CurseForge modpack archive")?;
+    writer
+        .finish()
+        .context("finalize CurseForge modpack archive")?;
     Ok(())
 }
 

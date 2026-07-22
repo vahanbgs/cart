@@ -50,10 +50,7 @@ pub struct Component {
 /// Same reasoning as `mrpack::dependencies_from`: a channel spec
 /// (`Latest`/`Recommended`) would drift on every re-export, so we
 /// reject those loudly and force the user to pin.
-pub fn components_from(
-    minecraft: &str,
-    loader: Option<&Loader>,
-) -> anyhow::Result<Vec<Component>> {
+pub fn components_from(minecraft: &str, loader: Option<&Loader>) -> anyhow::Result<Vec<Component>> {
     let mut components = vec![Component {
         uid: "net.minecraft".to_owned(),
         version: minecraft.to_owned(),
@@ -138,8 +135,8 @@ pub fn write_pack(
         .with_context(|| format!("write {pack_path}"))?;
 
     for (filename, source) in mods {
-        let bytes = std::fs::read(source)
-            .with_context(|| format!("read mod jar {}", source.display()))?;
+        let bytes =
+            std::fs::read(source).with_context(|| format!("read mod jar {}", source.display()))?;
         let dest = format!("{instance_name}/.minecraft/mods/{filename}");
         writer
             .start_file(&dest, options)

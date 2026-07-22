@@ -8,9 +8,7 @@
 //! the field-level locking.
 
 use cart::api::{
-    Endpoint,
-    curseforge,
-    modrinth,
+    Endpoint, curseforge, modrinth,
     piston::{
         AssetManifest, JavaDistributionManifest, JavaPlatform, JavaVersionComponent, Version,
         VersionManifest,
@@ -135,6 +133,10 @@ async fn curseforge_search_still_returns_hits() {
     assert!(!hits.is_empty(), "search returned no hits");
     for h in &hits {
         assert!(!h.slug.is_empty(), "hit {} has empty slug", h.id);
-        assert!(!h.primary_author().is_empty(), "hit {} has no author", h.slug);
+        assert!(
+            !h.primary_author().is_empty(),
+            "hit {} has no author",
+            h.slug
+        );
     }
 }

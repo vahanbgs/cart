@@ -89,11 +89,7 @@ impl Search {
         let title_width = hits.iter().map(|h| h.title.len()).max().unwrap_or(0);
         let downloads_labels: Vec<String> =
             hits.iter().map(|h| format_downloads(h.downloads)).collect();
-        let downloads_width = downloads_labels
-            .iter()
-            .map(|s| s.len())
-            .max()
-            .unwrap_or(0);
+        let downloads_width = downloads_labels.iter().map(|s| s.len()).max().unwrap_or(0);
 
         for (hit, downloads) in hits.iter().zip(downloads_labels.iter()) {
             let description = truncate(&hit.description, 60);
@@ -160,11 +156,7 @@ impl HitChoice {
         let title_width = hits.iter().map(|h| h.title.len()).max().unwrap_or(0);
         let downloads_labels: Vec<String> =
             hits.iter().map(|h| format_downloads(h.downloads)).collect();
-        let downloads_width = downloads_labels
-            .iter()
-            .map(|s| s.len())
-            .max()
-            .unwrap_or(0);
+        let downloads_width = downloads_labels.iter().map(|s| s.len()).max().unwrap_or(0);
 
         hits.into_iter()
             .zip(downloads_labels)

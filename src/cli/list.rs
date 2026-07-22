@@ -6,8 +6,7 @@ impl List {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         let config = Config::load(cli).await?;
 
-        let mut entries: Vec<(&String, &ModDependency)> =
-            config.manifest().mods.iter().collect();
+        let mut entries: Vec<(&String, &ModDependency)> = config.manifest().mods.iter().collect();
         entries.sort_by_key(|(name, _)| name.as_str());
 
         if entries.is_empty() {
@@ -27,7 +26,11 @@ impl List {
             .unwrap_or(0);
 
         for (name, dep) in entries {
-            let disabled_suffix = if dep.is_disabled() { "  (disabled)" } else { "" };
+            let disabled_suffix = if dep.is_disabled() {
+                "  (disabled)"
+            } else {
+                ""
+            };
             let line = format!(
                 "{name:<name_width$}  {source:<source_width$}  {version:<version_width$}{disabled_suffix}",
                 source = source_label(dep),

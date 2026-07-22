@@ -17,8 +17,7 @@ fn fixture(relative: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/piston")
         .join(relative);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
 fn load_version(id: &str) -> Version {
@@ -93,7 +92,10 @@ fn missing_java_version_defaults_to_jre_legacy_java_8() {
             JavaVersionComponent::JreLegacy,
             "{id}: unexpected Java component"
         );
-        assert_eq!(v.java_version.major_version, 8, "{id}: unexpected Java major");
+        assert_eq!(
+            v.java_version.major_version, 8,
+            "{id}: unexpected Java major"
+        );
     }
 }
 

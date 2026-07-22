@@ -26,7 +26,11 @@ async fn build_command_1_20_1_vanilla_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -86,7 +90,11 @@ async fn build_command_1_12_2_vanilla_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -144,7 +152,11 @@ async fn build_command_1_12_2_forge_recommended_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -156,7 +168,8 @@ async fn build_command_1_12_2_forge_recommended_has_expected_shape() {
         "expected bundled java runtime, got: {program}"
     );
     assert!(
-        args.iter().any(|a| a == "net.minecraft.launchwrapper.Launch"),
+        args.iter()
+            .any(|a| a == "net.minecraft.launchwrapper.Launch"),
         "expected launchwrapper main class in args:\n{args:#?}"
     );
 
@@ -224,7 +237,11 @@ async fn build_command_1_12_2_forge_latest_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -236,7 +253,8 @@ async fn build_command_1_12_2_forge_latest_has_expected_shape() {
         "expected bundled java runtime, got: {program}"
     );
     assert!(
-        args.iter().any(|a| a == "net.minecraft.launchwrapper.Launch"),
+        args.iter()
+            .any(|a| a == "net.minecraft.launchwrapper.Launch"),
         "expected launchwrapper main class in args:\n{args:#?}"
     );
 
@@ -298,7 +316,11 @@ async fn build_command_1_20_1_forge_recommended_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -388,7 +410,11 @@ async fn build_command_1_20_1_forge_latest_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -470,7 +496,11 @@ async fn build_command_1_21_1_neoforge_latest_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -568,7 +598,11 @@ async fn build_command_1_20_1_fabric_latest_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -652,7 +686,11 @@ async fn build_command_1_16_5_forge_recommended_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -713,7 +751,11 @@ async fn build_command_1_16_5_forge_latest_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -777,7 +819,11 @@ async fn build_command_1_7_10_forge_recommended_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -789,7 +835,8 @@ async fn build_command_1_7_10_forge_recommended_has_expected_shape() {
         "expected bundled java runtime, got: {program}"
     );
     assert!(
-        args.iter().any(|a| a == "net.minecraft.launchwrapper.Launch"),
+        args.iter()
+            .any(|a| a == "net.minecraft.launchwrapper.Launch"),
         "expected launchwrapper main class in args:\n{args:#?}"
     );
 
@@ -848,7 +895,11 @@ async fn build_command_1_16_5_vanilla_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -898,7 +949,11 @@ async fn build_command_1_7_10_vanilla_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -948,7 +1003,11 @@ async fn build_command_1_6_4_vanilla_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -1001,7 +1060,11 @@ async fn build_command_1_2_5_vanilla_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -1013,7 +1076,8 @@ async fn build_command_1_2_5_vanilla_has_expected_shape() {
         "expected bundled java runtime, got: {program}"
     );
     assert!(
-        args.iter().any(|a| a == "net.minecraft.launchwrapper.Launch"),
+        args.iter()
+            .any(|a| a == "net.minecraft.launchwrapper.Launch"),
         "expected launchwrapper main class in args:\n{args:#?}"
     );
 
@@ -1050,7 +1114,11 @@ async fn build_command_b1_7_vanilla_has_expected_shape() {
     let launcher = Launcher::builder().cache_dir(common::cache_dir()).build();
     let (command, _natives_directory) = launcher.build_command(&instance).await.unwrap();
 
-    let program = command.as_std().get_program().to_string_lossy().into_owned();
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
     let args: Vec<String> = command
         .as_std()
         .get_args()
@@ -1062,7 +1130,8 @@ async fn build_command_b1_7_vanilla_has_expected_shape() {
         "expected bundled java runtime, got: {program}"
     );
     assert!(
-        args.iter().any(|a| a == "net.minecraft.launchwrapper.Launch"),
+        args.iter()
+            .any(|a| a == "net.minecraft.launchwrapper.Launch"),
         "expected launchwrapper main class in args:\n{args:#?}"
     );
 

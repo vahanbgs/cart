@@ -134,7 +134,9 @@ mod tests {
             #[allow(dead_code)]
             loader: Loader,
         }
-        toml::from_str::<Wrapper>(toml_body).unwrap_err().to_string()
+        toml::from_str::<Wrapper>(toml_body)
+            .unwrap_err()
+            .to_string()
     }
 
     #[test]

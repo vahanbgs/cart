@@ -13,7 +13,7 @@ use crate::api::{
     piston::{Argument, Arguments, LibraryDownloadEntry, LibraryDownloadOptions, LibraryEntry},
 };
 
-use super::{cache::Cache, LoaderSpec};
+use super::{LoaderSpec, cache::Cache};
 
 pub struct FabricInstallResult {
     pub main_class: String,
@@ -37,9 +37,7 @@ pub async fn install(
         .fetch_json(&fabric::profile_url(mc_version, &effective_version), None)
         .await
         .with_context(|| {
-            format!(
-                "failed to fetch Fabric profile for mc={mc_version} loader={effective_version}"
-            )
+            format!("failed to fetch Fabric profile for mc={mc_version} loader={effective_version}")
         })?;
 
     if profile.inherits_from != mc_version {

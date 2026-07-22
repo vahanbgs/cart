@@ -143,19 +143,18 @@ pub async fn install(
         .chain(forge_version_manifest.libraries.iter())
     {
         if let Some(artifact) = &lib.downloads.artifact
-            && artifact.url.is_none() {
-                let entry_name = format!("maven/{}", artifact.path.display());
-                let jar_url = flavor
-                    .maven_base_url()
-                    .join(&artifact.path.to_string_lossy())
-                    .with_context(|| {
-                        format!("failed to build Forge Maven URL for: {}", lib.name)
-                    })?;
-                let cache_path = cache.path_from_url(&jar_url)?;
-                if !fs::try_exists(&cache_path).await? {
-                    extract_from_installer(&installer_path, &entry_name, &cache_path)?;
-                }
+            && artifact.url.is_none()
+        {
+            let entry_name = format!("maven/{}", artifact.path.display());
+            let jar_url = flavor
+                .maven_base_url()
+                .join(&artifact.path.to_string_lossy())
+                .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
+            let cache_path = cache.path_from_url(&jar_url)?;
+            if !fs::try_exists(&cache_path).await? {
+                extract_from_installer(&installer_path, &entry_name, &cache_path)?;
             }
+        }
     }
 
     // Legacy Forge (1.7.10 era) bundles the Forge JAR at the root of
@@ -389,9 +388,10 @@ async fn run_processors(
     for processor in processors {
         // Only run client-side processors.
         if let Some(sides) = &processor.sides
-            && !sides.iter().any(|s| s == "client") {
-                continue;
-            }
+            && !sides.iter().any(|s| s == "client")
+        {
+            continue;
+        }
 
         let proc_jar = lib_paths
             .get(&processor.jar)
@@ -499,10 +499,12 @@ fn substitute_arg(
             return path.to_string_lossy().into_owned();
         }
         if let Ok(coord) = MavenCoordinate::parse(inner) {
-            return local_dir.join(coord.to_path()).to_string_lossy().into_owned();
+            return local_dir
+                .join(coord.to_path())
+                .to_string_lossy()
+                .into_owned();
         }
     }
 
     arg.to_owned()
 }
-

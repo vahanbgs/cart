@@ -118,8 +118,7 @@ pub(super) async fn resolve_url(
             file: file_id,
             ..
         } => {
-            let cf = curseforge_http
-                .expect("sync_mods should have built the CurseForge client");
+            let cf = curseforge_http.expect("sync_mods should have built the CurseForge client");
             let file = curseforge::fetch_file(cf, *project_id, *file_id).await?;
             file.download_url.ok_or_else(|| {
                 anyhow!(
@@ -150,8 +149,13 @@ async fn sync_mods(
     let curseforge_http = build_curseforge_client_if_needed(config.manifest())?;
 
     for (mod_name, mod_source) in &config.manifest().mods {
-        let url =
-            resolve_url(mod_source, config.manifest(), &http, curseforge_http.as_ref()).await?;
+        let url = resolve_url(
+            mod_source,
+            config.manifest(),
+            &http,
+            curseforge_http.as_ref(),
+        )
+        .await?;
         let cached = tokio::fs::try_exists(cache.path_from_url(&url)?).await?;
         tracing::info!(
             "{action} {mod_name}",
@@ -178,10 +182,7 @@ async fn sync_mods(
 /// and non-jar files (e.g. `mods/1.12.2/foo.jar` layouts, README files)
 /// are left alone — pack authors sometimes stash version-specific mod
 /// folders or notes alongside the managed jars.
-async fn prune_stale_jars(
-    mods_directory: &Path,
-    expected: &HashSet<String>,
-) -> anyhow::Result<()> {
+async fn prune_stale_jars(mods_directory: &Path, expected: &HashSet<String>) -> anyhow::Result<()> {
     let mut entries = fs::read_dir(mods_directory).await?;
     while let Some(entry) = entries.next_entry().await? {
         if !entry.file_type().await?.is_file() {
@@ -341,7 +342,9 @@ mod tests {
     #[tokio::test]
     async fn reject_ok_when_dir_missing() {
         let dir = tempfile::tempdir().unwrap();
-        reject_src_mods_jars(&dir.path().join("mods")).await.unwrap();
+        reject_src_mods_jars(&dir.path().join("mods"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -423,12 +426,18 @@ mod tests {
         let target = dir.path().join("out");
         fs::create_dir_all(&source).await.unwrap();
         fs::create_dir_all(&target).await.unwrap();
-        fs::write(source.join("options.txt"), b"fresh").await.unwrap();
-        fs::write(target.join("options.txt"), b"stale").await.unwrap();
+        fs::write(source.join("options.txt"), b"fresh")
+            .await
+            .unwrap();
+        fs::write(target.join("options.txt"), b"stale")
+            .await
+            .unwrap();
 
         copy_source_dir(&source, &target).await.unwrap();
 
-        let contents = fs::read_to_string(target.join("options.txt")).await.unwrap();
+        let contents = fs::read_to_string(target.join("options.txt"))
+            .await
+            .unwrap();
         assert_eq!(contents, "fresh");
     }
 }

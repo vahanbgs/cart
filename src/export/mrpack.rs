@@ -100,10 +100,7 @@ pub enum EnvValue {
 /// or `Recommended` loader spec would drift on every re-export, so we
 /// reject those loudly and force the user to pin. `None` (vanilla)
 /// produces a dependencies block with just `minecraft` set.
-pub fn dependencies_from(
-    minecraft: &str,
-    loader: Option<&Loader>,
-) -> anyhow::Result<Dependencies> {
+pub fn dependencies_from(minecraft: &str, loader: Option<&Loader>) -> anyhow::Result<Dependencies> {
     let mut deps = Dependencies {
         minecraft: minecraft.to_owned(),
         forge: None,
@@ -205,12 +202,14 @@ pub fn build_entry(m: &ResolvedMod<'_>) -> anyhow::Result<PackEntry> {
             Ok(PackEntry::File(file))
         }
         ModSource::CurseForge => {
-            m.download_url.with_context(|| format!(
-                "CurseForge mod '{}' has no third-party download URL — the author \
+            m.download_url.with_context(|| {
+                format!(
+                    "CurseForge mod '{}' has no third-party download URL — the author \
                  disabled API redistribution. Can't include this mod in an mrpack; \
                  remove it from cart.toml or replace it with the Modrinth equivalent.",
-                m.filename
-            ))?;
+                    m.filename
+                )
+            })?;
             let jar = m
                 .cached_jar
                 .with_context(|| format!("mod '{}' has no cached jar", m.filename))?;
@@ -227,8 +226,7 @@ pub fn build_entry(m: &ResolvedMod<'_>) -> anyhow::Result<PackEntry> {
 /// should go through [`build_entry`] so the source routing stays in
 /// one place.
 fn pack_file_from(url: &str, jar: &Path, filename: &str) -> anyhow::Result<PackFile> {
-    let bytes = std::fs::read(jar)
-        .with_context(|| format!("read cached jar {}", jar.display()))?;
+    let bytes = std::fs::read(jar).with_context(|| format!("read cached jar {}", jar.display()))?;
     let sha1 = sha1_hex(&bytes);
     let sha512 = sha512_hex(&bytes);
     Ok(PackFile {
@@ -259,8 +257,8 @@ pub fn write_pack(
     overrides: &[(String, PathBuf)],
     output: &Path,
 ) -> anyhow::Result<()> {
-    let file = std::fs::File::create(output)
-        .with_context(|| format!("create {}", output.display()))?;
+    let file =
+        std::fs::File::create(output).with_context(|| format!("create {}", output.display()))?;
     let mut writer = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
@@ -407,11 +405,10 @@ mod tests {
         };
 
         let actual = serde_json::to_string_pretty(&index).unwrap();
-        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/mrpack/index_minimal.json");
-        let expected = std::fs::read_to_string(&fixture_path).unwrap_or_else(|e| {
-            panic!("read {}: {e}", fixture_path.display())
-        });
+        let fixture_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mrpack/index_minimal.json");
+        let expected = std::fs::read_to_string(&fixture_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", fixture_path.display()));
 
         assert_eq!(actual.trim_end(), expected.trim_end());
     }
@@ -439,8 +436,7 @@ mod tests {
         let jar = dir.path().join("example.jar");
         std::fs::write(&jar, b"abc").unwrap();
 
-        let file = pack_file_from("https://example.com/example.jar", &jar, "example.jar")
-            .unwrap();
+        let file = pack_file_from("https://example.com/example.jar", &jar, "example.jar").unwrap();
 
         assert_eq!(file.path, "mods/example.jar");
         assert_eq!(file.file_size, 3);
@@ -479,7 +475,10 @@ mod tests {
         };
         match build_entry(&m).unwrap() {
             PackEntry::File(f) => {
-                assert_eq!(f.downloads, vec!["https://cdn.modrinth.com/data/xxx/mod.jar"]);
+                assert_eq!(
+                    f.downloads,
+                    vec!["https://cdn.modrinth.com/data/xxx/mod.jar"]
+                );
                 assert_eq!(f.path, "mods/mod.jar");
             }
             PackEntry::Override { .. } => panic!("Modrinth entry should go in files[]"),
@@ -596,7 +595,13 @@ mod tests {
             curseforge_ids: Some((238222, 8419086)),
         };
         let err = build_entry(&m).unwrap_err().to_string();
-        assert!(err.contains("picky-mod.jar"), "expected filename in error: {err}");
-        assert!(err.contains("CurseForge"), "expected CurseForge in error: {err}");
+        assert!(
+            err.contains("picky-mod.jar"),
+            "expected filename in error: {err}"
+        );
+        assert!(
+            err.contains("CurseForge"),
+            "expected CurseForge in error: {err}"
+        );
     }
 }

@@ -55,10 +55,7 @@ impl Launcher {
     /// requested, plus the temporary natives directory it references.
     /// Split out from `launch` so tests can spawn on their own timeline
     /// — the `TempDir` must outlive the child process.
-    pub async fn build_command(
-        &self,
-        instance: &Instance,
-    ) -> anyhow::Result<(Command, TempDir)> {
+    pub async fn build_command(&self, instance: &Instance) -> anyhow::Result<(Command, TempDir)> {
         let version_manifest = self
             .cache
             .fetch_json::<VersionManifest>(VersionManifest::url(), None)
@@ -100,110 +97,104 @@ impl Launcher {
 
         // ── Loader ────────────────────────────────────────────────────────────
         let mut resolved_forge_family: Option<(forge::ForgeFlavor, String)> = None;
-        let (client_jar, forge_extra_libraries, forge_main_class, forge_game_args, forge_jvm_args) = match instance
-            .loader()
-            .map(|l| (l, l.kind))
-        {
-            None => (vanilla_client_jar, vec![], None, (None, vec![]), vec![]),
-            Some((loader, LoaderKind::NeoForge)) => {
-                let neoforge_version = match &loader.spec {
-                    LoaderSpec::Recommended => {
-                        anyhow::bail!(
-                            "NeoForge has no `recommended` channel; use `latest` or a pinned version"
-                        );
+        let (client_jar, forge_extra_libraries, forge_main_class, forge_game_args, forge_jvm_args) =
+            match instance.loader().map(|l| (l, l.kind)) {
+                None => (vanilla_client_jar, vec![], None, (None, vec![]), vec![]),
+                Some((loader, LoaderKind::NeoForge)) => {
+                    let neoforge_version = match &loader.spec {
+                        LoaderSpec::Recommended => {
+                            anyhow::bail!(
+                                "NeoForge has no `recommended` channel; use `latest` or a pinned version"
+                            );
+                        }
+                        LoaderSpec::Pinned(v) => v.clone(),
+                        LoaderSpec::Latest => {
+                            let metadata =
+                                crate::api::neoforge::MavenMetadata::fetch(self.cache.client())
+                                    .await?;
+                            metadata.latest_stable_for_mc(version_id).ok_or_else(|| {
+                                anyhow!("no stable NeoForge release for Minecraft {version_id}")
+                            })?
+                        }
+                    };
+                    tracing::info!("resolved NeoForge for mc={version_id} to {neoforge_version}");
+
+                    let result = forge::install(
+                        forge::ForgeFlavor::NeoForge,
+                        &neoforge_version,
+                        &vanilla_client_jar,
+                        &java_path,
+                        &self.cache,
+                    )
+                    .await?;
+
+                    let fv = result.version;
+                    let game_args = fv.minecraft_arguments.clone();
+                    let jvm_args = fv.arguments.jvm.clone();
+                    let game_args_modern = fv.arguments.game.clone();
+
+                    // NeoForge's `-DignoreList` (from its version.json) filters
+                    // `client-extra,${version_name}.jar` from modlauncher's
+                    // module scan — but NOT `neoforge-`. Two consequences:
+                    //
+                    //   1. Putting the PATCHED `neoforge-<ver>-client.jar` on
+                    //      the classpath would let Java auto-modularize it as
+                    //      module `neoforge`, colliding with the `FML-System-
+                    //      Mods: neoforge` module discovered in `library_
+                    //      directory` via `-universal.jar`. So we use the
+                    //      vanilla client jar instead. PATCHED still lives in
+                    //      `library_directory` where FMLLoader finds it.
+                    //
+                    //   2. The vanilla client jar's cache filename is
+                    //      `client.jar` (from its piston-data URL). Java
+                    //      would auto-modularize it as module `client`,
+                    //      exporting `com.mojang.blaze3d.platform` — colliding
+                    //      with the `minecraft` module FML derives from
+                    //      PATCHED. Match `${version_name}.jar` in the
+                    //      ignoreList by hardlinking it under
+                    //      `<cache>/versions/<vid>/<vid>.jar`, mirroring
+                    //      what vanilla launchers do.
+                    let versioned_client = self
+                        .cache
+                        .directory()
+                        .join("versions")
+                        .join(&version.id)
+                        .join(format!("{}.jar", &version.id));
+                    if !fs::try_exists(&versioned_client).await? {
+                        fs::create_dir_all(versioned_client.parent().unwrap()).await?;
+                        fs::hard_link(&vanilla_client_jar, &versioned_client).await?;
                     }
-                    LoaderSpec::Pinned(v) => v.clone(),
-                    LoaderSpec::Latest => {
-                        let metadata =
-                            crate::api::neoforge::MavenMetadata::fetch(self.cache.client())
-                                .await?;
-                        metadata.latest_stable_for_mc(version_id).ok_or_else(|| {
-                            anyhow!("no stable NeoForge release for Minecraft {version_id}")
-                        })?
-                    }
-                };
-                tracing::info!(
-                    "resolved NeoForge for mc={version_id} to {neoforge_version}"
-                );
+                    let client_jar = versioned_client;
 
-                let result = forge::install(
-                    forge::ForgeFlavor::NeoForge,
-                    &neoforge_version,
-                    &vanilla_client_jar,
-                    &java_path,
-                    &self.cache,
-                )
-                .await?;
+                    resolved_forge_family =
+                        Some((forge::ForgeFlavor::NeoForge, result.effective_version));
 
-                let fv = result.version;
-                let game_args = fv.minecraft_arguments.clone();
-                let jvm_args = fv.arguments.jvm.clone();
-                let game_args_modern = fv.arguments.game.clone();
-
-                // NeoForge's `-DignoreList` (from its version.json) filters
-                // `client-extra,${version_name}.jar` from modlauncher's
-                // module scan — but NOT `neoforge-`. Two consequences:
-                //
-                //   1. Putting the PATCHED `neoforge-<ver>-client.jar` on
-                //      the classpath would let Java auto-modularize it as
-                //      module `neoforge`, colliding with the `FML-System-
-                //      Mods: neoforge` module discovered in `library_
-                //      directory` via `-universal.jar`. So we use the
-                //      vanilla client jar instead. PATCHED still lives in
-                //      `library_directory` where FMLLoader finds it.
-                //
-                //   2. The vanilla client jar's cache filename is
-                //      `client.jar` (from its piston-data URL). Java
-                //      would auto-modularize it as module `client`,
-                //      exporting `com.mojang.blaze3d.platform` — colliding
-                //      with the `minecraft` module FML derives from
-                //      PATCHED. Match `${version_name}.jar` in the
-                //      ignoreList by hardlinking it under
-                //      `<cache>/versions/<vid>/<vid>.jar`, mirroring
-                //      what vanilla launchers do.
-                let versioned_client = self
-                    .cache
-                    .directory()
-                    .join("versions")
-                    .join(&version.id)
-                    .join(format!("{}.jar", &version.id));
-                if !fs::try_exists(&versioned_client).await? {
-                    fs::create_dir_all(versioned_client.parent().unwrap()).await?;
-                    fs::hard_link(&vanilla_client_jar, &versioned_client).await?;
+                    (
+                        client_jar,
+                        fv.libraries,
+                        Some(fv.main_class),
+                        (game_args, game_args_modern),
+                        jvm_args,
+                    )
                 }
-                let client_jar = versioned_client;
-
-                resolved_forge_family =
-                    Some((forge::ForgeFlavor::NeoForge, result.effective_version));
-
-                (
-                    client_jar,
-                    fv.libraries,
-                    Some(fv.main_class),
-                    (game_args, game_args_modern),
-                    jvm_args,
-                )
-            }
-            Some((loader, LoaderKind::Forge)) => {
+                Some((loader, LoaderKind::Forge)) => {
                     let forge_channel = match &loader.spec {
                         LoaderSpec::Latest => "latest",
                         LoaderSpec::Recommended => "recommended",
                         LoaderSpec::Pinned(v) => v.as_str(),
                     };
-                    let forge_version = if matches!(
-                        &loader.spec,
-                        LoaderSpec::Latest | LoaderSpec::Recommended
-                    ) {
-                        let promotions = self
-                            .cache
-                            .fetch_json::<ForgePromotions>(ForgePromotions::url(), None)
-                            .await?;
-                        promotions.resolve(version_id, forge_channel).ok_or_else(|| {
+                    let forge_version =
+                        if matches!(&loader.spec, LoaderSpec::Latest | LoaderSpec::Recommended) {
+                            let promotions = self
+                                .cache
+                                .fetch_json::<ForgePromotions>(ForgePromotions::url(), None)
+                                .await?;
+                            promotions.resolve(version_id, forge_channel).ok_or_else(|| {
                             anyhow!("no Forge {forge_channel} release for Minecraft {version_id}")
                         })?
-                    } else {
-                        format!("{version_id}-{forge_channel}")
-                    };
+                        } else {
+                            format!("{version_id}-{forge_channel}")
+                        };
 
                     let result = forge::install(
                         forge::ForgeFlavor::Forge,
@@ -234,21 +225,21 @@ impl Launcher {
                         jvm_args,
                     )
                 }
-            Some((loader, LoaderKind::Fabric)) => {
-                // Fabric: no client-JAR patching, no legacy game-args
-                // string. Extra libs come from the profile JSON, the
-                // JVM boots KnotClient, and the modern game/jvm args
-                // are merged on top of vanilla's.
-                let result = fabric::install(version_id, &loader.spec, &self.cache).await?;
-                (
-                    vanilla_client_jar,
-                    result.libraries,
-                    Some(result.main_class),
-                    (None, result.game_args),
-                    result.jvm_args,
-                )
-            }
-        };
+                Some((loader, LoaderKind::Fabric)) => {
+                    // Fabric: no client-JAR patching, no legacy game-args
+                    // string. Extra libs come from the profile JSON, the
+                    // JVM boots KnotClient, and the modern game/jvm args
+                    // are merged on top of vanilla's.
+                    let result = fabric::install(version_id, &loader.spec, &self.cache).await?;
+                    (
+                        vanilla_client_jar,
+                        result.libraries,
+                        Some(result.main_class),
+                        (None, result.game_args),
+                        result.jvm_args,
+                    )
+                }
+            };
 
         // Forge-family extras have empty artifact URLs; their cache paths
         // are derived from the flavor's maven base. Vanilla and Fabric
@@ -391,10 +382,9 @@ impl Launcher {
         }
 
         match &resolved_forge_family {
-            Some((flavor, fv)) => tracing::info!(
-                "launching minecraft {} with {flavor:?} {fv}",
-                version.id
-            ),
+            Some((flavor, fv)) => {
+                tracing::info!("launching minecraft {} with {flavor:?} {fv}", version.id)
+            }
             None => tracing::info!("launching minecraft {}", version.id),
         }
 
@@ -411,10 +401,7 @@ impl Launcher {
         let status = command.status().await?;
         if !status.success() {
             let log_path = instance.directory().join("logs").join("latest.log");
-            tracing::warn!(
-                "minecraft exited with {status}; see {}",
-                log_path.display()
-            );
+            tracing::warn!("minecraft exited with {status}; see {}", log_path.display());
         }
 
         Ok(())

@@ -80,15 +80,14 @@ impl Export {
 /// the mrpack ZIP. Every step that talks to the network or the shared
 /// mod cache lives here; [`mrpack::write_pack`] itself does only
 /// serialization and archive writing.
-async fn run_mrpack(
-    config: &Config<'_>,
-    launcher: &Launcher,
-    output: &Path,
-) -> anyhow::Result<()> {
+async fn run_mrpack(config: &Config<'_>, launcher: &Launcher, output: &Path) -> anyhow::Result<()> {
     let manifest = config.manifest();
     // `Export::run` already validated `name`/`version` before dispatching
     // here — the `expect` calls document that contract.
-    let name = manifest.name.as_deref().expect("name validated by Export::run");
+    let name = manifest
+        .name
+        .as_deref()
+        .expect("name validated by Export::run");
     let version = manifest
         .version
         .as_deref()
@@ -164,7 +163,10 @@ async fn run_curseforge(
     output: &Path,
 ) -> anyhow::Result<()> {
     let manifest = config.manifest();
-    let name = manifest.name.as_deref().expect("name validated by Export::run");
+    let name = manifest
+        .name
+        .as_deref()
+        .expect("name validated by Export::run");
     let version = manifest
         .version
         .as_deref()
@@ -242,13 +244,12 @@ async fn run_curseforge(
 /// Assemble a Prism/MultiMC instance ZIP from the manifest. Every mod
 /// is embedded (Prism instances are self-contained), so this driver
 /// fetches every entry — no per-source routing decision like mrpack/CF.
-async fn run_prism(
-    config: &Config<'_>,
-    launcher: &Launcher,
-    output: &Path,
-) -> anyhow::Result<()> {
+async fn run_prism(config: &Config<'_>, launcher: &Launcher, output: &Path) -> anyhow::Result<()> {
     let manifest = config.manifest();
-    let name = manifest.name.as_deref().expect("name validated by Export::run");
+    let name = manifest
+        .name
+        .as_deref()
+        .expect("name validated by Export::run");
 
     let components = prism::components_from(&manifest.minecraft, manifest.loader.as_ref())?;
 
@@ -382,7 +383,9 @@ mod tests {
         let source = dir.path().join("src");
         fs::create_dir_all(source.join("config/sub")).await.unwrap();
         fs::write(source.join("options.txt"), b"a").await.unwrap();
-        fs::write(source.join("config/foo.toml"), b"b").await.unwrap();
+        fs::write(source.join("config/foo.toml"), b"b")
+            .await
+            .unwrap();
         fs::write(source.join("config/sub/bar.json"), b"c")
             .await
             .unwrap();
