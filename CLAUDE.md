@@ -44,7 +44,8 @@ The crate is structured as both a binary and a library. `src/main.rs` is the bin
 5. The game is launched with the bundled Java binary, using a temp dir for natives
 
 **Key types:**
-- `Manifest` (`src/manifest.rs`) — `cart.toml` deserialization. Fields: `minecraft: String`, `forge: Option<String>`, `mods: HashMap<String, ModDependency>`
+- `Manifest` (`src/manifest.rs`) — `cart.toml` deserialization. Fields: `minecraft: String`, `loader: Option<cart::Loader>`, `mods: HashMap<String, ModDependency>`
+- `Loader` (`src/launcher/loader.rs`) — `{ kind: LoaderKind, spec: LoaderSpec }` where `LoaderKind ∈ {Forge, Fabric}` and `LoaderSpec ∈ {Latest, Recommended, Pinned(String)}`. `Recommended` is Forge-only, rejected at parse time for Fabric.
 - `ModDependency` (`src/manifest/mod_dependency.rs`) — untagged serde enum with two variants: `Modrinth { modrinth, version, disabled }` (loose if `version` is `None`) and `Url { url, disabled }`. `filename()` returns `<name>.jar` or `<name>.jar.disabled`
 - `manifest::document` — `toml_edit`-based helpers (`load_document`, `save_document`, `add_modrinth_mod`, `remove_mod`, `set_mod_disabled`, `set_mod_version`). All the mutating subcommands go through these so comments and formatting in `cart.toml` are preserved
 - `Config` (`src/config.rs`) — merges manifest with CLI flag overrides (e.g. `--mv` overrides `minecraft` field)
@@ -56,7 +57,7 @@ The crate is structured as both a binary and a library. `src/main.rs` is the bin
 
 **External APIs:**
 - `src/api/piston/` — serde types for all Mojang API responses: version manifest, per-version manifest, Java distribution manifest, asset index, library rules, and native classifiers. Platform detection for native libraries lives in `NativeClassifier::current()` and `OsName::matches_current_platform()`.
-- `src/api/modrinth.rs` — `resolve()` picks a Modrinth version by slug given a `minecraft_version` + `loader`. Called from `cart add`, `cart update`, and `cart build`. Loader is currently just `"forge"` or `"vanilla"` based on whether `manifest.forge` is set — this is the TODO point where Fabric/NeoForge fields would land.
+- `src/api/modrinth.rs` — `resolve()` picks a Modrinth version by slug given a `minecraft_version` + `loader`. Called from `cart add`, `cart update`, and `cart build`. Loader string comes from `manifest.loader.kind`: `"forge"`, `"fabric"`, or `"vanilla"` when no loader is set.
 - `src/api/forge.rs` — Forge installer/version metadata.
 
 **Note on duplication:** the `cli/run.rs` command composes `Build::run_with` directly (sharing a `Launcher`) rather than shelling out to `Build::run`, so build+launch reuse one config load.
@@ -65,7 +66,13 @@ The crate is structured as both a binary and a library. `src/main.rs` is the bin
 
 ```toml
 minecraft = "1.20.1"
-forge = "47.2.0"                                          # optional
+# loader is optional. Bare string → latest of that loader.
+# loader = "fabric"                                        # → Fabric latest
+# loader = "forge"                                         # → Forge latest
+# loader = { forge = "recommended" }                       # Forge stable channel
+# loader = { forge = "47.3.12" }                           # pinned Forge build
+# loader = { fabric = "0.15.7" }                           # pinned Fabric loader
+loader = { forge = "47.2.0" }
 
 [mods]
 jei = { modrinth = "jei", version = "15.2.0.27" }          # Modrinth, pinned

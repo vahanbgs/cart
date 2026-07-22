@@ -1,6 +1,3 @@
-// Wired into `Manifest` in the next commit; keep the linter quiet meanwhile.
-#![allow(dead_code)]
-
 //! Mod-loader selector in `cart.toml`.
 //!
 //! ```toml
@@ -44,6 +41,22 @@ impl LoaderSpec {
 pub struct Loader {
     pub kind: LoaderKind,
     pub spec: LoaderSpec,
+}
+
+impl Loader {
+    pub fn forge(spec: LoaderSpec) -> Self {
+        Self {
+            kind: LoaderKind::Forge,
+            spec,
+        }
+    }
+
+    pub fn fabric(spec: LoaderSpec) -> Self {
+        Self {
+            kind: LoaderKind::Fabric,
+            spec,
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for Loader {

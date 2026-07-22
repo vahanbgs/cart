@@ -9,7 +9,7 @@
 //! Once warm, subsequent runs finish in under a second. Invoke with
 //! `cargo test --test launcher_command -- --ignored`.
 
-use cart::{Instance, Launcher};
+use cart::{Instance, Launcher, Loader, LoaderSpec};
 
 #[tokio::test]
 #[ignore = "warms the shared cart cache on first run"]
@@ -134,7 +134,7 @@ async fn build_command_1_12_2_forge_recommended_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.12.2")
-        .forge_spec("recommended")
+        .loader(Loader::forge(LoaderSpec::Recommended))
         .build(game_dir.path().to_path_buf());
 
     let launcher = Launcher::new();
@@ -214,7 +214,7 @@ async fn build_command_1_12_2_forge_latest_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.12.2")
-        .forge_spec("latest")
+        .loader(Loader::forge(LoaderSpec::Latest))
         .build(game_dir.path().to_path_buf());
 
     let launcher = Launcher::new();
@@ -288,7 +288,7 @@ async fn build_command_1_20_1_forge_recommended_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.20.1")
-        .forge_spec("recommended")
+        .loader(Loader::forge(LoaderSpec::Recommended))
         .build(game_dir.path().to_path_buf());
 
     let launcher = Launcher::new();
@@ -378,7 +378,7 @@ async fn build_command_1_20_1_forge_latest_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.20.1")
-        .forge_spec("latest")
+        .loader(Loader::forge(LoaderSpec::Latest))
         .build(game_dir.path().to_path_buf());
 
     let launcher = Launcher::new();
@@ -459,7 +459,7 @@ async fn build_command_1_16_5_forge_recommended_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.16.5")
-        .forge_spec("recommended")
+        .loader(Loader::forge(LoaderSpec::Recommended))
         .build(game_dir.path().to_path_buf());
 
     let launcher = Launcher::new();
@@ -520,7 +520,7 @@ async fn build_command_1_16_5_forge_latest_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.16.5")
-        .forge_spec("latest")
+        .loader(Loader::forge(LoaderSpec::Latest))
         .build(game_dir.path().to_path_buf());
 
     let launcher = Launcher::new();
@@ -584,7 +584,7 @@ async fn build_command_1_7_10_forge_recommended_has_expected_shape() {
     let game_dir = tempfile::tempdir().unwrap();
     let instance = Instance::builder()
         .version("1.7.10")
-        .forge_spec("recommended")
+        .loader(Loader::forge(LoaderSpec::Recommended))
         .build(game_dir.path().to_path_buf());
 
     let launcher = Launcher::new();

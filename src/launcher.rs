@@ -3,9 +3,11 @@ mod cache;
 pub mod forge;
 mod instance;
 mod java;
+mod loader;
 
 pub use cache::ModCache;
 pub use instance::Instance;
+pub use loader::{Loader, LoaderKind, LoaderSpec};
 use tempfile::TempDir;
 use tokio::{fs, process::Command};
 
@@ -95,22 +97,35 @@ impl Launcher {
 
         let natives_directory = tempfile::tempdir()?;
 
-        // ── Forge ────────────────────────────────────────────────────────────
+        // ── Loader ────────────────────────────────────────────────────────────
         let mut resolved_forge_version: Option<String> = None;
         let (client_jar, forge_extra_libraries, forge_main_class, forge_game_args, forge_jvm_args) =
-            if let Some(forge_spec) = instance.forge_spec() {
-                let forge_version = if matches!(forge_spec, "latest" | "recommended") {
+            if let Some(loader) = instance.loader() {
+                match loader.kind {
+                    LoaderKind::Fabric => {
+                        anyhow::bail!(
+                            "fabric loader is not yet wired up in the launch pipeline"
+                        );
+                    }
+                    LoaderKind::Forge => {}
+                }
+                let forge_channel = match &loader.spec {
+                    LoaderSpec::Latest => "latest",
+                    LoaderSpec::Recommended => "recommended",
+                    LoaderSpec::Pinned(v) => v.as_str(),
+                };
+                let forge_version = if matches!(&loader.spec, LoaderSpec::Latest | LoaderSpec::Recommended) {
                     let promotions = self
                         .cache
                         .fetch_json::<ForgePromotions>(ForgePromotions::url(), None)
                         .await?;
                     promotions
-                        .resolve(version_id, forge_spec)
+                        .resolve(version_id, forge_channel)
                         .ok_or_else(|| {
-                            anyhow!("no Forge {forge_spec} release for Minecraft {version_id}")
+                            anyhow!("no Forge {forge_channel} release for Minecraft {version_id}")
                         })?
                 } else {
-                    format!("{version_id}-{forge_spec}")
+                    format!("{version_id}-{forge_channel}")
                 };
 
                 let result =

@@ -1,5 +1,4 @@
 mod document;
-mod loader;
 mod mod_dependency;
 
 pub use document::{
@@ -21,7 +20,7 @@ use tokio::fs;
 #[derive(Debug, Deserialize)]
 pub struct Manifest {
     pub minecraft: String,
-    pub forge: Option<String>,
+    pub loader: Option<cart::Loader>,
     pub mods: HashMap<String, ModDependency>,
 }
 

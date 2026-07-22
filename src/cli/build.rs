@@ -99,11 +99,10 @@ async fn resolve_url(
         ModDependency::Modrinth {
             modrinth, version, ..
         } => {
-            // TODO: expand when the manifest grows Fabric/NeoForge fields.
-            let loader = if manifest.forge.is_some() {
-                "forge"
-            } else {
-                "vanilla"
+            let loader = match manifest.loader.as_ref().map(|l| l.kind) {
+                Some(cart::LoaderKind::Fabric) => "fabric",
+                Some(cart::LoaderKind::Forge) => "forge",
+                None => "vanilla",
             };
             let resolved = modrinth::resolve(
                 http,

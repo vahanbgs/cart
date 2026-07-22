@@ -19,7 +19,7 @@
 
 use std::{path::Path, time::Duration};
 
-use cart::{Instance, Launcher};
+use cart::{Instance, Launcher, Loader, LoaderKind, LoaderSpec};
 
 async fn read_log_tail(game_dir: &Path) -> String {
     match tokio::fs::read_to_string(game_dir.join("logs/latest.log")).await {
@@ -43,20 +43,31 @@ async fn assert_launches_cleanly(version: &str, watch: Duration) {
     spawn_and_watch(instance, game_dir, version, watch).await;
 }
 
-/// Forge variant of `assert_launches_cleanly`. Kept separate so the
-/// existing vanilla callsites don't need to grow an `Option<&str>`
+/// Loader variant of `assert_launches_cleanly`. Kept separate so the
+/// existing vanilla callsites don't need to grow an `Option<Loader>`
 /// argument — inline duplication is fine while the shape settles.
-async fn assert_launches_with_forge_cleanly(
+async fn assert_launches_with_loader_cleanly(
     version: &str,
-    forge_spec: &str,
+    loader: Loader,
     watch: Duration,
 ) {
     let game_dir = tempfile::tempdir().unwrap();
+    let label = format!(
+        "{version}+{kind}:{spec}",
+        kind = match loader.kind {
+            LoaderKind::Fabric => "fabric",
+            LoaderKind::Forge => "forge",
+        },
+        spec = match &loader.spec {
+            LoaderSpec::Latest => "latest".to_owned(),
+            LoaderSpec::Recommended => "recommended".to_owned(),
+            LoaderSpec::Pinned(v) => v.clone(),
+        }
+    );
     let instance = Instance::builder()
         .version(version)
-        .forge_spec(forge_spec)
+        .loader(loader)
         .build(game_dir.path().to_path_buf());
-    let label = format!("{version}+forge:{forge_spec}");
     spawn_and_watch(instance, game_dir, &label, watch).await;
 }
 
@@ -138,41 +149,76 @@ async fn launches_b1_7_vanilla() {
 #[tokio::test]
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_1_12_2_forge_recommended() {
-    assert_launches_with_forge_cleanly("1.12.2", "recommended", Duration::from_secs(15)).await;
+    assert_launches_with_loader_cleanly(
+        "1.12.2",
+        Loader::forge(LoaderSpec::Recommended),
+        Duration::from_secs(15),
+    )
+    .await;
 }
 
 #[tokio::test]
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_1_12_2_forge_latest() {
-    assert_launches_with_forge_cleanly("1.12.2", "latest", Duration::from_secs(15)).await;
+    assert_launches_with_loader_cleanly(
+        "1.12.2",
+        Loader::forge(LoaderSpec::Latest),
+        Duration::from_secs(15),
+    )
+    .await;
 }
 
 #[tokio::test]
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_1_20_1_forge_recommended() {
-    assert_launches_with_forge_cleanly("1.20.1", "recommended", Duration::from_secs(15)).await;
+    assert_launches_with_loader_cleanly(
+        "1.20.1",
+        Loader::forge(LoaderSpec::Recommended),
+        Duration::from_secs(15),
+    )
+    .await;
 }
 
 #[tokio::test]
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_1_20_1_forge_latest() {
-    assert_launches_with_forge_cleanly("1.20.1", "latest", Duration::from_secs(15)).await;
+    assert_launches_with_loader_cleanly(
+        "1.20.1",
+        Loader::forge(LoaderSpec::Latest),
+        Duration::from_secs(15),
+    )
+    .await;
 }
 
 #[tokio::test]
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_1_16_5_forge_recommended() {
-    assert_launches_with_forge_cleanly("1.16.5", "recommended", Duration::from_secs(15)).await;
+    assert_launches_with_loader_cleanly(
+        "1.16.5",
+        Loader::forge(LoaderSpec::Recommended),
+        Duration::from_secs(15),
+    )
+    .await;
 }
 
 #[tokio::test]
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_1_16_5_forge_latest() {
-    assert_launches_with_forge_cleanly("1.16.5", "latest", Duration::from_secs(15)).await;
+    assert_launches_with_loader_cleanly(
+        "1.16.5",
+        Loader::forge(LoaderSpec::Latest),
+        Duration::from_secs(15),
+    )
+    .await;
 }
 
 #[tokio::test]
 #[ignore = "spawns Minecraft — needs a display (see file header)"]
 async fn launches_1_7_10_forge_recommended() {
-    assert_launches_with_forge_cleanly("1.7.10", "recommended", Duration::from_secs(15)).await;
+    assert_launches_with_loader_cleanly(
+        "1.7.10",
+        Loader::forge(LoaderSpec::Recommended),
+        Duration::from_secs(15),
+    )
+    .await;
 }

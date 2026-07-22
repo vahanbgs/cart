@@ -233,7 +233,7 @@ mod tests {
         let input = "\
 # top-level comment
 minecraft = \"1.12.2\"  # trailing comment
-forge = \"latest\"
+loader = { forge = \"latest\" }
 
 # section comment
 [mods]

@@ -52,11 +52,10 @@ impl Add {
         slug: &str,
     ) -> anyhow::Result<()> {
         let minecraft_version = &config.manifest().minecraft;
-        // TODO: expand when the manifest grows Fabric/NeoForge fields.
-        let loader = if config.manifest().forge.is_some() {
-            "forge"
-        } else {
-            "vanilla"
+        let loader = match config.manifest().loader.as_ref().map(|l| l.kind) {
+            Some(cart::LoaderKind::Fabric) => "fabric",
+            Some(cart::LoaderKind::Forge) => "forge",
+            None => "vanilla",
         };
 
         let http = Client::new();
@@ -107,11 +106,10 @@ impl Add {
         slug: &str,
     ) -> anyhow::Result<()> {
         let minecraft_version = &config.manifest().minecraft;
-        let loader = if config.manifest().forge.is_some() {
-            Some(curseforge::LoaderType::Forge)
-        } else {
-            None
-        };
+        let loader = config.manifest().loader.as_ref().map(|l| match l.kind {
+            cart::LoaderKind::Fabric => curseforge::LoaderType::Fabric,
+            cart::LoaderKind::Forge => curseforge::LoaderType::Forge,
+        });
 
         let key = std::env::var(CURSEFORGE_API_KEY_ENV).with_context(|| {
             format!(

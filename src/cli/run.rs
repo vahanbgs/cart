@@ -21,8 +21,8 @@ impl Run {
         let game_directory = config.manifest_directory().join("minecraft/");
         let mut builder = Instance::builder().version(config.minecraft_version());
 
-        if let Some(forge) = config.manifest().forge.as_deref() {
-            builder = builder.forge_spec(forge);
+        if let Some(loader) = config.manifest().loader.clone() {
+            builder = builder.loader(loader);
         }
 
         let instance = builder.build(game_directory);

@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use super::Launcher;
+use super::{Launcher, Loader};
 
 pub struct Instance {
     directory: PathBuf,
     version: String,
-    forge_spec: Option<String>,
+    loader: Option<Loader>,
 }
 
 impl Instance {
@@ -16,7 +16,7 @@ impl Instance {
     pub fn builder() -> InstanceBuilder {
         InstanceBuilder {
             version: "latest".to_string(),
-            forge_spec: None,
+            loader: None,
         }
     }
 
@@ -28,10 +28,9 @@ impl Instance {
         &self.version
     }
 
-    /// The raw Forge version spec from `cart.toml`: `"latest"`, `"recommended"`,
-    /// or a specific version number like `"47.3.12"`.  `None` means vanilla.
-    pub fn forge_spec(&self) -> Option<&str> {
-        self.forge_spec.as_deref()
+    /// Mod loader for this instance. `None` means vanilla.
+    pub fn loader(&self) -> Option<&Loader> {
+        self.loader.as_ref()
     }
 
     pub async fn launch(&self) -> anyhow::Result<()> {
@@ -41,7 +40,7 @@ impl Instance {
 
 pub struct InstanceBuilder {
     version: String,
-    forge_spec: Option<String>,
+    loader: Option<Loader>,
 }
 
 impl InstanceBuilder {
@@ -49,7 +48,7 @@ impl InstanceBuilder {
         Instance {
             directory: directory.into(),
             version: self.version,
-            forge_spec: self.forge_spec,
+            loader: self.loader,
         }
     }
 
@@ -58,8 +57,8 @@ impl InstanceBuilder {
         self
     }
 
-    pub fn forge_spec(mut self, spec: impl Into<String>) -> Self {
-        self.forge_spec = Some(spec.into());
+    pub fn loader(mut self, loader: Loader) -> Self {
+        self.loader = Some(loader);
         self
     }
 }

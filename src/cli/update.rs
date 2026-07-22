@@ -24,17 +24,16 @@ impl Update {
         let config = Config::load(cli).await?;
         let path = config.manifest_directory().join("cart.toml");
         let minecraft_version = &config.manifest().minecraft;
-        // TODO: expand when the manifest grows Fabric/NeoForge fields.
-        let modrinth_loader = if config.manifest().forge.is_some() {
-            "forge"
-        } else {
-            "vanilla"
+        let loader_kind = config.manifest().loader.as_ref().map(|l| l.kind);
+        let modrinth_loader = match loader_kind {
+            Some(cart::LoaderKind::Fabric) => "fabric",
+            Some(cart::LoaderKind::Forge) => "forge",
+            None => "vanilla",
         };
-        let curseforge_loader = config
-            .manifest()
-            .forge
-            .as_ref()
-            .map(|_| curseforge::LoaderType::Forge);
+        let curseforge_loader = loader_kind.map(|k| match k {
+            cart::LoaderKind::Fabric => curseforge::LoaderType::Fabric,
+            cart::LoaderKind::Forge => curseforge::LoaderType::Forge,
+        });
 
         // Named subset validation — fail fast on typos rather than silently
         // updating nothing.

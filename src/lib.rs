@@ -1,7 +1,7 @@
 pub mod api;
 mod launcher;
 
-pub use launcher::{Instance, Launcher, ModCache};
+pub use launcher::{Instance, Launcher, Loader, LoaderKind, LoaderSpec, ModCache};
 
 use serde::{Deserialize, Serialize};
 
