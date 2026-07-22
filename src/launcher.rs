@@ -140,9 +140,38 @@ impl Launcher {
                 let jvm_args = fv.arguments.jvm.clone();
                 let game_args_modern = fv.arguments.game.clone();
 
-                let client_jar = result
-                    .patched_client_jar
-                    .unwrap_or_else(|| vanilla_client_jar.clone());
+                // NeoForge's `-DignoreList` (from its version.json) filters
+                // `client-extra,${version_name}.jar` from modlauncher's
+                // module scan — but NOT `neoforge-`. Two consequences:
+                //
+                //   1. Putting the PATCHED `neoforge-<ver>-client.jar` on
+                //      the classpath would let Java auto-modularize it as
+                //      module `neoforge`, colliding with the `FML-System-
+                //      Mods: neoforge` module discovered in `library_
+                //      directory` via `-universal.jar`. So we use the
+                //      vanilla client jar instead. PATCHED still lives in
+                //      `library_directory` where FMLLoader finds it.
+                //
+                //   2. The vanilla client jar's cache filename is
+                //      `client.jar` (from its piston-data URL). Java
+                //      would auto-modularize it as module `client`,
+                //      exporting `com.mojang.blaze3d.platform` — colliding
+                //      with the `minecraft` module FML derives from
+                //      PATCHED. Match `${version_name}.jar` in the
+                //      ignoreList by hardlinking it under
+                //      `<cache>/versions/<vid>/<vid>.jar`, mirroring
+                //      what vanilla launchers do.
+                let versioned_client = self
+                    .cache
+                    .directory()
+                    .join("versions")
+                    .join(&version.id)
+                    .join(format!("{}.jar", &version.id));
+                if !fs::try_exists(&versioned_client).await? {
+                    fs::create_dir_all(versioned_client.parent().unwrap()).await?;
+                    fs::hard_link(&vanilla_client_jar, &versioned_client).await?;
+                }
+                let client_jar = versioned_client;
 
                 resolved_forge_family =
                     Some((forge::ForgeFlavor::NeoForge, result.effective_version));
