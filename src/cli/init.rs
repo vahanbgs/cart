@@ -6,6 +6,8 @@ use std::{
 use anyhow::Context;
 use cart::api::{
     Endpoint,
+    fabric::GameVersions,
+    forge::ForgePromotions,
     piston::{Kind, VersionManifest},
 };
 use clap::Args;
@@ -70,7 +72,7 @@ impl Init {
             None => pick_minecraft_version().await?,
         };
 
-        let loader = pick_loader().await?;
+        let loader = pick_loader(&mc_version).await?;
 
         let mut document = DocumentMut::new();
         document["minecraft"] = value(mc_version);
@@ -122,18 +124,62 @@ async fn pick_minecraft_version() -> anyhow::Result<String> {
     .await??)
 }
 
-async fn pick_loader() -> anyhow::Result<LoaderChoice> {
-    Ok(tokio::task::spawn_blocking(|| {
-        Select::new(
-            "Mod loader",
-            vec![
-                LoaderChoice::Fabric,
-                LoaderChoice::Forge,
-                LoaderChoice::Vanilla,
-            ],
-        )
-        .with_help_message("↑↓ navigate • enter to select")
-        .prompt()
+/// Loader menu, filtered by what actually supports `mc_version`. Fabric
+/// only offers 1.14+ (whatever appears in `/v2/versions/game`); Forge
+/// only offers MC versions that have a promotions entry — so we don't
+/// suggest an impossible combination the launcher would fail on.
+///
+/// If a support check errors (e.g. offline), the loader is *hidden*.
+/// Hiding beats silently allowing a combination that `cart run` can't
+/// resolve, and Vanilla is always available as an escape hatch.
+async fn pick_loader(mc_version: &str) -> anyhow::Result<LoaderChoice> {
+    let http = Client::new();
+    let (fabric_ok, forge_ok) = tokio::join!(
+        fabric_supports_mc(&http, mc_version),
+        forge_supports_mc(&http, mc_version),
+    );
+
+    let mut options = Vec::new();
+    if fabric_ok {
+        options.push(LoaderChoice::Fabric);
+    }
+    if forge_ok {
+        options.push(LoaderChoice::Forge);
+    }
+    options.push(LoaderChoice::Vanilla);
+
+    Ok(tokio::task::spawn_blocking(move || {
+        Select::new("Mod loader", options)
+            .with_help_message("↑↓ navigate • enter to select")
+            .prompt()
     })
     .await??)
+}
+
+async fn fabric_supports_mc(http: &Client, mc_version: &str) -> bool {
+    async fn inner(http: &Client, mc_version: &str) -> anyhow::Result<bool> {
+        let list: GameVersions = http
+            .get(GameVersions::url().clone())
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        Ok(list.contains(mc_version))
+    }
+    inner(http, mc_version).await.unwrap_or(false)
+}
+
+async fn forge_supports_mc(http: &Client, mc_version: &str) -> bool {
+    async fn inner(http: &Client, mc_version: &str) -> anyhow::Result<bool> {
+        let promotions: ForgePromotions = http
+            .get(ForgePromotions::url().clone())
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        Ok(promotions.supports_mc(mc_version))
+    }
+    inner(http, mc_version).await.unwrap_or(false)
 }
