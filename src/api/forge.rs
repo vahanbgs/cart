@@ -34,6 +34,17 @@ impl ForgePromotions {
 
         Some(format!("{mc_version}-{forge_version}"))
     }
+
+    /// Whether Forge has ever released for `mc_version`. `cart init` uses
+    /// this to keep Forge out of the loader menu for MC versions Forge
+    /// hasn't caught up to (typically fresh snapshots, or brand-new
+    /// releases in the first weeks after they drop).
+    pub fn supports_mc(&self, mc_version: &str) -> bool {
+        self.promos.contains_key(&format!("{mc_version}-latest"))
+            || self
+                .promos
+                .contains_key(&format!("{mc_version}-recommended"))
+    }
 }
 
 impl Endpoint for ForgePromotions {
@@ -195,4 +206,30 @@ pub struct ForgeArguments {
     pub game: Vec<Argument>,
     #[serde(default)]
     pub jvm: Vec<Argument>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn promotions_with(entries: &[(&str, &str)]) -> ForgePromotions {
+        ForgePromotions {
+            promos: entries
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn supports_mc_matches_either_channel() {
+        let p = promotions_with(&[
+            ("1.20.1-recommended", "47.4.10"),
+            ("1.20.1-latest", "47.4.22"),
+            ("1.7.10-recommended", "10.13.4.1614"),
+        ]);
+        assert!(p.supports_mc("1.20.1"));
+        assert!(p.supports_mc("1.7.10"));
+        assert!(!p.supports_mc("25w40a"));
+    }
 }
