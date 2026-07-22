@@ -99,14 +99,61 @@ impl Launcher {
         let natives_directory = tempfile::tempdir()?;
 
         // ── Loader ────────────────────────────────────────────────────────────
-        let mut resolved_forge_version: Option<String> = None;
+        let mut resolved_forge_family: Option<(forge::ForgeFlavor, String)> = None;
         let (client_jar, forge_extra_libraries, forge_main_class, forge_game_args, forge_jvm_args) = match instance
             .loader()
             .map(|l| (l, l.kind))
         {
             None => (vanilla_client_jar, vec![], None, (None, vec![]), vec![]),
-            Some((_, LoaderKind::NeoForge)) => {
-                anyhow::bail!("neoforge loader is not yet wired up in the launch pipeline");
+            Some((loader, LoaderKind::NeoForge)) => {
+                let neoforge_version = match &loader.spec {
+                    LoaderSpec::Recommended => {
+                        anyhow::bail!(
+                            "NeoForge has no `recommended` channel; use `latest` or a pinned version"
+                        );
+                    }
+                    LoaderSpec::Pinned(v) => v.clone(),
+                    LoaderSpec::Latest => {
+                        let metadata =
+                            crate::api::neoforge::MavenMetadata::fetch(self.cache.client())
+                                .await?;
+                        metadata.latest_stable_for_mc(version_id).ok_or_else(|| {
+                            anyhow!("no stable NeoForge release for Minecraft {version_id}")
+                        })?
+                    }
+                };
+                tracing::info!(
+                    "resolved NeoForge for mc={version_id} to {neoforge_version}"
+                );
+
+                let result = forge::install(
+                    forge::ForgeFlavor::NeoForge,
+                    &neoforge_version,
+                    &vanilla_client_jar,
+                    &java_path,
+                    &self.cache,
+                )
+                .await?;
+
+                let fv = result.version;
+                let game_args = fv.minecraft_arguments.clone();
+                let jvm_args = fv.arguments.jvm.clone();
+                let game_args_modern = fv.arguments.game.clone();
+
+                let client_jar = result
+                    .patched_client_jar
+                    .unwrap_or_else(|| vanilla_client_jar.clone());
+
+                resolved_forge_family =
+                    Some((forge::ForgeFlavor::NeoForge, result.effective_version));
+
+                (
+                    client_jar,
+                    fv.libraries,
+                    Some(fv.main_class),
+                    (game_args, game_args_modern),
+                    jvm_args,
+                )
             }
             Some((loader, LoaderKind::Forge)) => {
                     let forge_channel = match &loader.spec {
@@ -147,7 +194,8 @@ impl Launcher {
                         .patched_client_jar
                         .unwrap_or_else(|| vanilla_client_jar.clone());
 
-                    resolved_forge_version = Some(result.effective_version);
+                    resolved_forge_family =
+                        Some((forge::ForgeFlavor::Forge, result.effective_version));
 
                     (
                         client_jar,
@@ -174,13 +222,11 @@ impl Launcher {
         };
 
         // Forge-family extras have empty artifact URLs; their cache paths
-        // are derived from the flavor's maven base. For now only Forge is
-        // dispatched (Fabric populates its URLs directly; NeoForge branch
-        // still bails); step 4 will thread NeoForge's base through here.
-        let forge_family_maven_base = match instance.loader().map(|l| l.kind) {
-            Some(LoaderKind::Forge) => Some(forge::FORGE_MAVEN_URL.clone()),
-            _ => None,
-        };
+        // are derived from the flavor's maven base. Vanilla and Fabric
+        // pass None (Fabric always populates artifact.url directly).
+        let forge_family_maven_base = resolved_forge_family
+            .as_ref()
+            .map(|(f, _)| f.maven_base_url().clone());
         let classpath = java::build_class_path(
             &version,
             &client_jar,
@@ -251,14 +297,19 @@ impl Launcher {
             // for FMLLoader to locate processor outputs (PATCHED, MC_SRG, …).
             // Must match the local dir used by the Forge install pipeline.
             (
-                // For now this always resolves to Forge's local maven
-                // dir; the NeoForge branch will override it in step 4.
-                // Vanilla and Fabric args don't reference this template,
-                // so the wrong flavor here is harmless for those paths.
+                // Resolves to whichever forge-family flavor is active
+                // (or Forge as a harmless default for vanilla/Fabric,
+                // which don't reference this template).
                 "library_directory",
-                forge::local_maven_dir(forge::ForgeFlavor::Forge, &self.cache)
-                    .to_string_lossy()
-                    .into_owned(),
+                forge::local_maven_dir(
+                    resolved_forge_family
+                        .as_ref()
+                        .map(|(f, _)| *f)
+                        .unwrap_or(forge::ForgeFlavor::Forge),
+                    &self.cache,
+                )
+                .to_string_lossy()
+                .into_owned(),
             ),
             ("classpath_separator", ":".to_owned()),
         ]
@@ -310,8 +361,11 @@ impl Launcher {
             }
         }
 
-        match &resolved_forge_version {
-            Some(fv) => tracing::info!("launching minecraft {} with forge {fv}", version.id),
+        match &resolved_forge_family {
+            Some((flavor, fv)) => tracing::info!(
+                "launching minecraft {} with {flavor:?} {fv}",
+                version.id
+            ),
             None => tracing::info!("launching minecraft {}", version.id),
         }
 
