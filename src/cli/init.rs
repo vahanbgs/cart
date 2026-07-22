@@ -8,6 +8,7 @@ use cart::api::{
     Endpoint,
     fabric::GameVersions,
     forge::ForgePromotions,
+    neoforge::MavenMetadata,
     piston::{Kind, VersionManifest},
 };
 use clap::Args;
@@ -25,13 +26,15 @@ pub struct Init {
     pub path: PathBuf,
 }
 
-/// Menu options for the loader picker. Ordered Fabric → Forge → Vanilla:
-/// the arrow keys default to the first entry and someone reaching for
-/// cart is likely wanting a modded setup; Fabric on top is the most
-/// common modern choice.
+/// Menu options for the loader picker. Ordered Fabric → NeoForge → Forge →
+/// Vanilla: the arrow keys default to the first entry and someone reaching
+/// for cart is likely wanting a modded setup; Fabric on top is the most
+/// common modern choice, NeoForge second for modern Forge-family, plain
+/// Forge for legacy MC versions.
 #[derive(Clone, Copy)]
 enum LoaderChoice {
     Fabric,
+    NeoForge,
     Forge,
     Vanilla,
 }
@@ -39,21 +42,23 @@ enum LoaderChoice {
 impl Display for LoaderChoice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Fabric => "Fabric  —  modern, lightweight",
-            Self::Forge => "Forge   —  classic, mature",
-            Self::Vanilla => "Vanilla —  no mod loader",
+            Self::Fabric => "Fabric   —  modern, lightweight",
+            Self::NeoForge => "NeoForge —  modern Forge fork (1.20.2+)",
+            Self::Forge => "Forge    —  classic, mature",
+            Self::Vanilla => "Vanilla  —  no mod loader",
         })
     }
 }
 
 impl LoaderChoice {
     /// The bare-string sugar we write into `cart.toml`. `None` for vanilla
-    /// (the `loader` key is omitted entirely). Both loader variants default
+    /// (the `loader` key is omitted entirely). All loader variants default
     /// to `latest` — matches the `loader = "fabric"` etc. sugar the manifest
     /// parser recognises.
     fn toml_value(self) -> Option<&'static str> {
         match self {
             Self::Fabric => Some("fabric"),
+            Self::NeoForge => Some("neoforge"),
             Self::Forge => Some("forge"),
             Self::Vanilla => None,
         }
@@ -134,14 +139,18 @@ async fn pick_minecraft_version() -> anyhow::Result<String> {
 /// resolve, and Vanilla is always available as an escape hatch.
 async fn pick_loader(mc_version: &str) -> anyhow::Result<LoaderChoice> {
     let http = Client::new();
-    let (fabric_ok, forge_ok) = tokio::join!(
+    let (fabric_ok, neoforge_ok, forge_ok) = tokio::join!(
         fabric_supports_mc(&http, mc_version),
+        neoforge_supports_mc(&http, mc_version),
         forge_supports_mc(&http, mc_version),
     );
 
     let mut options = Vec::new();
     if fabric_ok {
         options.push(LoaderChoice::Fabric);
+    }
+    if neoforge_ok {
+        options.push(LoaderChoice::NeoForge);
     }
     if forge_ok {
         options.push(LoaderChoice::Forge);
@@ -182,4 +191,11 @@ async fn forge_supports_mc(http: &Client, mc_version: &str) -> bool {
         Ok(promotions.supports_mc(mc_version))
     }
     inner(http, mc_version).await.unwrap_or(false)
+}
+
+async fn neoforge_supports_mc(http: &Client, mc_version: &str) -> bool {
+    MavenMetadata::fetch(http)
+        .await
+        .map(|m| m.supports_mc(mc_version))
+        .unwrap_or(false)
 }
