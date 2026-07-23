@@ -7,6 +7,7 @@ pub use mod_cache::ModCache;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
+use fs4::fs_std::FileExt;
 use futures::StreamExt;
 use reqwest::Client;
 use sha1::{Digest, Sha1};
@@ -56,10 +57,53 @@ impl Cache {
     ) -> anyhow::Result<PathBuf> {
         let path = self.path_from_url(url)?;
 
+        // Warm-cache fast path: if the target is already there, skip the
+        // flock entirely and keep the hot path at a single `stat`.
+        if fs::try_exists(&path).await? {
+            tracing::debug!("Fetched '{url}' from the cache");
+            return Ok(path);
+        }
+
         let Some(parent_directory_path) = path.parent() else {
             bail!("Path '{:?}' has no parent directory.", path);
         };
 
+        // Cross-process + cross-instance advisory lock on the target file.
+        // `flock(2)` is per open file description on Linux, so two threads
+        // in this process opening the lockfile independently still contend
+        // correctly — one primitive handles both intra-process races
+        // (multiple `Launcher`s in the test suite sharing the per-binary
+        // temp cache) and inter-process races (two `cart` invocations
+        // against `~/.cache/cart/`). Mirrors the pattern in
+        // [`super::forge::install`]. The lockfile sits adjacent to the
+        // target with a `.NAME.lock` name so `ls` doesn't surface it, and
+        // we never unlink it — a delete+relock race would be worse than
+        // leaving a zero-byte file behind.
+        fs::create_dir_all(parent_directory_path).await?;
+        let lock_path = parent_directory_path.join(format!(
+            ".{}.lock",
+            path.file_name()
+                .expect("path_from_url always yields a filename")
+                .to_string_lossy()
+        ));
+        let _fetch_guard =
+            tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .read(true)
+                    .write(true)
+                    .truncate(false)
+                    .open(&lock_path)?;
+                file.lock_exclusive()?;
+                Ok(file)
+            })
+            .await
+            .context("await cache fetch lock task")?
+            .context("acquire cache fetch lock")?;
+
+        // Re-check under the lock: another writer may have completed the
+        // download while we blocked, and redoing the work would just churn
+        // the target with identical bytes.
         if fs::try_exists(&path).await? {
             tracing::debug!("Fetched '{url}' from the cache");
             return Ok(path);
@@ -72,14 +116,12 @@ impl Cache {
             .await?
             .error_for_status()?;
 
-        fs::create_dir_all(parent_directory_path).await?;
-
-        // Stream into a uniquely-named sibling of `path` and rename it in
-        // atomically once the digest verifies. Two concurrent fetchers of
-        // the same URL each get their own temp path, so their writes can't
-        // interleave and corrupt the final file; the last rename wins and
-        // both callers observe the same bytes. On any error the `TempPath`
-        // drops and unlinks the partial file — no `.tmp` litter left behind.
+        // Stream into a uniquely-named sibling of `path` and atomically
+        // rename it into place once the digest verifies. The flock makes
+        // this a single-writer critical section, so the temp file's real
+        // job here is crash safety: readers never see a half-written
+        // target, and any early exit drops the `TempPath` which unlinks
+        // the partial file — no `.tmp` litter left behind.
         let temp_path = NamedTempFile::new_in(parent_directory_path)?.into_temp_path();
         let mut file = fs::File::create(&temp_path).await?;
         let mut stream = response.bytes_stream();
