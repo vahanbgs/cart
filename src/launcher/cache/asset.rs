@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use futures::{StreamExt, TryStreamExt};
 use tokio::fs;
 use url::Url;
 
@@ -7,6 +8,13 @@ use crate::api::piston::{AssetIndex, AssetManifest};
 use crate::launcher::fs_ops;
 
 use super::Cache;
+
+/// Max in-flight asset fetches. Modern MC asset indexes list 1000+ tiny
+/// hash-addressed objects; running them serially is RTT-bound and dominates
+/// cold-cache launch time. Kept well below reqwest's default per-host pool
+/// cap so we don't starve concurrent library/Java fetches sharing the
+/// client, and gentle enough on Mojang's asset CDN.
+const ASSET_FETCH_CONCURRENCY: usize = 8;
 
 pub struct AssetCache<'cache> {
     cache: &'cache Cache,
@@ -53,26 +61,33 @@ impl<'cache> AssetCache<'cache> {
             .map_to_resources
             .then(|| self.directory().join("virtual").join(&asset_index.id));
 
-        for (name, object) in &asset_manifest.objects {
-            let digest = object.hash.to_hex();
-            let first_byte = hex::encode(&object.hash.as_bytes()[..1]);
-            let url = asset_store_url
-                .join(&format!("{}/", &first_byte))?
-                .join(&digest)?;
+        let virtual_directory = virtual_directory.as_ref();
+        let asset_store_url = &asset_store_url;
+        futures::stream::iter(&asset_manifest.objects)
+            .map(|(name, object)| async move {
+                let digest = object.hash.to_hex();
+                let first_byte = hex::encode(&object.hash.as_bytes()[..1]);
+                let url = asset_store_url
+                    .join(&format!("{}/", &first_byte))?
+                    .join(&digest)?;
 
-            if let Some(virtual_directory) = &virtual_directory {
-                let virtual_path = virtual_directory.join(name);
-                self.cache
-                    .materialize(&url, Some(&object.hash), &virtual_path)
-                    .await?;
-            } else {
-                // Legacy asset indexes flag virtual materialization; modern
-                // ones don't — but we still need to pull the object into the
-                // cache so the game can resolve it via the assets/objects
-                // symlink below.
-                self.cache.fetch(&url, Some(&object.hash)).await?;
-            }
-        }
+                if let Some(virtual_directory) = virtual_directory {
+                    let virtual_path = virtual_directory.join(name);
+                    self.cache
+                        .materialize(&url, Some(&object.hash), &virtual_path)
+                        .await?;
+                } else {
+                    // Legacy asset indexes flag virtual materialization; modern
+                    // ones don't — but we still need to pull the object into the
+                    // cache so the game can resolve it via the assets/objects
+                    // symlink below.
+                    self.cache.fetch(&url, Some(&object.hash)).await?;
+                }
+                Ok::<_, anyhow::Error>(())
+            })
+            .buffer_unordered(ASSET_FETCH_CONCURRENCY)
+            .try_collect::<()>()
+            .await?;
 
         fs_ops::symlink("../resources.download.minecraft.net/", &assets_objects_path).await?;
 
