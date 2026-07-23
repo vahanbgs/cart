@@ -28,6 +28,7 @@ static MOJANG_LIBRARIES_URL: LazyLock<Url> =
 
 use super::cache::Cache;
 use crate::parallel;
+use crate::progress::{self, IndicatifSpanExt};
 
 async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
     fs::set_permissions(path, Permissions::from_mode(0o755)).await?;
@@ -62,6 +63,16 @@ pub async fn fetch_java_distribution(
 
     let java_distribution_path = cache.java_dir(java_version_component.as_ref());
 
+    // Bar length = File entries only (Directory/Link are cheap local
+    // ops with no per-item work worth counting).
+    let file_count = java_distribution
+        .files
+        .values()
+        .filter(|e| matches!(e, FileSystemEntry::File { .. }))
+        .count();
+    let bar = progress::bar("java", file_count as u64);
+    bar.pb_start();
+    let bar = &bar;
     let java_distribution_path_ref = &java_distribution_path;
     parallel::run(java_distribution.files, |(path, fs_entry)| async move {
         if let FileSystemEntry::File {
@@ -76,6 +87,7 @@ pub async fn fetch_java_distribution(
             if executable {
                 make_executable(target_path).await?;
             }
+            bar.pb_inc(1);
         }
         Ok(())
     })
