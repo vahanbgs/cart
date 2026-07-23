@@ -60,10 +60,7 @@ pub async fn fetch_java_distribution(
         )
         .await?;
 
-    let java_distribution_path = cache
-        .directory()
-        .join("java")
-        .join(java_version_component.as_ref());
+    let java_distribution_path = cache.java_dir(java_version_component.as_ref());
 
     for (path, fs_entry) in java_distribution.files {
         if let FileSystemEntry::File {

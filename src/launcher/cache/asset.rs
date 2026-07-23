@@ -15,7 +15,7 @@ pub struct AssetCache<'cache> {
 
 impl<'cache> AssetCache<'cache> {
     pub fn new(cache: &'cache Cache) -> Self {
-        let directory = cache.directory().join("assets");
+        let directory = cache.assets_dir();
 
         Self { cache, directory }
     }

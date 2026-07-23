@@ -25,8 +25,31 @@ impl Cache {
         Self { path, client }
     }
 
-    pub fn directory(&self) -> &Path {
-        &self.path
+    /// A path under the cache root — `{cache}/{name}`. Escape hatch for
+    /// domains whose subpath is derived from a runtime value (e.g. Forge's
+    /// per-flavor maven mirror path). Prefer the typed accessors
+    /// (`assets_dir`, `java_dir`, `versions_dir`) where they fit.
+    pub fn namespace(&self, name: impl AsRef<Path>) -> PathBuf {
+        self.path.join(name)
+    }
+
+    /// Asset cache root — `{cache}/assets`.
+    pub fn assets_dir(&self) -> PathBuf {
+        self.namespace("assets")
+    }
+
+    /// Per-Java-component runtime directory — `{cache}/java/{component}`.
+    /// `component` is typically `JavaVersionComponent::as_ref()`.
+    pub fn java_dir(&self, component: impl AsRef<Path>) -> PathBuf {
+        self.namespace("java").join(component)
+    }
+
+    /// Per-version JAR namespace — `{cache}/versions`. Callers compose the
+    /// `<vid>/<vid>.jar` tail themselves; only NeoForge needs this today
+    /// (mirroring the vanilla launcher's `versions/` layout so JPMS module
+    /// naming lands on `<vid>` instead of the piston-data `client` name).
+    pub fn versions_dir(&self) -> PathBuf {
+        self.namespace("versions")
     }
 
     /// True if `url`'s target has already been persisted to the cache.

@@ -75,7 +75,7 @@ impl ForgeFlavor {
 /// against — so it must be a single directory that also contains every
 /// downloaded loader lib.
 pub fn local_maven_dir(flavor: ForgeFlavor, cache: &Cache) -> PathBuf {
-    cache.directory().join(flavor.local_maven_subdir())
+    cache.namespace(flavor.local_maven_subdir())
 }
 
 pub struct ForgeInstallResult {
@@ -122,7 +122,7 @@ pub async fn install(
     // flock is released when the file handle drops. Advisory only —
     // non-cart processes ignore it, which is fine because only cart
     // writes here.
-    let lock_dir = cache.directory().join("forge");
+    let lock_dir = cache.namespace("forge");
     fs::create_dir_all(&lock_dir).await?;
     let lock_path = lock_dir.join(INSTALL_LOCK_FILE);
     let _cross_process_guard =
@@ -165,8 +165,7 @@ pub async fn install(
         parse_installer(&installer_path).context("failed to parse Forge installer")?;
 
     let marker = cache
-        .directory()
-        .join("forge")
+        .namespace("forge")
         .join(&effective_version)
         .join(".installed");
 

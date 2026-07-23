@@ -161,8 +161,7 @@ impl Launcher {
                     //      what vanilla launchers do.
                     let versioned_client = self
                         .cache
-                        .directory()
-                        .join("versions")
+                        .versions_dir()
                         .join(&version.id)
                         .join(format!("{}.jar", &version.id));
                     fs::create_dir_all(versioned_client.parent().unwrap()).await?;
