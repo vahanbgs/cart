@@ -2,6 +2,7 @@ pub mod api;
 pub mod export;
 mod launcher;
 pub mod parallel;
+pub mod progress;
 
 pub use launcher::{Instance, Launcher, Loader, LoaderKind, LoaderSpec};
 
