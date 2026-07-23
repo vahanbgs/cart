@@ -103,7 +103,6 @@ async fn run_mrpack(config: &Config<'_>, launcher: &Launcher, output: &Path) -> 
 
     let http = Client::new();
     let curseforge_http = build::build_curseforge_client_if_needed(manifest)?;
-    let cache = launcher.mod_cache();
 
     let mut files: Vec<PackFile> = Vec::new();
     let mut overrides: Vec<(String, PathBuf)> = Vec::new();
@@ -119,7 +118,7 @@ async fn run_mrpack(config: &Config<'_>, launcher: &Launcher, output: &Path) -> 
         // `fetch_mod` is idempotent — downloads if the cache misses,
         // returns the path either way. No separate "is cached?" check
         // needed.
-        let cached_jar = cache.fetch_mod(&url).await?;
+        let cached_jar = launcher.fetch_mod(&url).await?;
         let filename = dep.filename(mod_name);
         let resolved = ResolvedMod {
             source: source_of(dep),
@@ -183,7 +182,6 @@ async fn run_curseforge(
     // client is needed; a plain HTTP client for the Modrinth/URL
     // branch is enough.
     let http = Client::new();
-    let cache = launcher.mod_cache();
 
     let mut files: Vec<CfFile> = Vec::new();
     let mut overrides: Vec<(String, PathBuf)> = Vec::new();
@@ -206,7 +204,7 @@ async fn run_curseforge(
             }
             _ => {
                 let url = build::resolve_url(dep, manifest, &http, None).await?;
-                (Some(cache.fetch_mod(&url).await?), None)
+                (Some(launcher.fetch_mod(&url).await?), None)
             }
         };
 
@@ -261,7 +259,6 @@ async fn run_prism(config: &Config<'_>, launcher: &Launcher, output: &Path) -> a
     // which means the CF client is required if any CF entry exists.
     let http = Client::new();
     let curseforge_http = build::build_curseforge_client_if_needed(manifest)?;
-    let cache = launcher.mod_cache();
 
     let mut mods: Vec<(String, PathBuf)> = Vec::new();
     let mut overrides: Vec<(String, PathBuf)> = Vec::new();
@@ -272,7 +269,7 @@ async fn run_prism(config: &Config<'_>, launcher: &Launcher, output: &Path) -> a
 
     for (mod_name, dep) in ordered {
         let url = build::resolve_url(dep, manifest, &http, curseforge_http.as_ref()).await?;
-        let cached_jar = cache.fetch_mod(&url).await?;
+        let cached_jar = launcher.fetch_mod(&url).await?;
         mods.push((dep.filename(mod_name), cached_jar));
     }
 

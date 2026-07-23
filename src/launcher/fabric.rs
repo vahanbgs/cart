@@ -5,6 +5,7 @@
 //! and the launcher merges that on top of vanilla.
 
 use anyhow::{Context, anyhow, bail};
+use reqwest::Client;
 
 use crate::api::{
     Endpoint,
@@ -29,8 +30,9 @@ pub async fn install(
     mc_version: &str,
     spec: &LoaderSpec,
     cache: &Cache,
+    http: &Client,
 ) -> anyhow::Result<FabricInstallResult> {
-    let effective_version = resolve_loader_version(spec, cache).await?;
+    let effective_version = resolve_loader_version(spec, http).await?;
     tracing::info!("resolved Fabric loader for mc={mc_version} to {effective_version}");
 
     let profile: Profile = cache
@@ -84,15 +86,14 @@ pub async fn install(
 /// FILE named `loader`, blocking the profile fetch from creating `loader/`
 /// as a directory. Uncached is also the correct semantic since new loaders
 /// release regularly.
-async fn resolve_loader_version(spec: &LoaderSpec, cache: &Cache) -> anyhow::Result<String> {
+async fn resolve_loader_version(spec: &LoaderSpec, http: &Client) -> anyhow::Result<String> {
     match spec {
         LoaderSpec::Pinned(v) => Ok(v.clone()),
         LoaderSpec::Recommended => {
             bail!("Fabric has no `recommended` channel; use `latest` or a pinned version")
         }
         LoaderSpec::Latest => {
-            let list: Vec<LoaderVersion> = cache
-                .client()
+            let list: Vec<LoaderVersion> = http
                 .get(LoaderVersions::url().clone())
                 .send()
                 .await?

@@ -33,8 +33,6 @@ impl Build {
     }
 
     pub async fn run_with(&self, config: &Config<'_>, launcher: &Launcher) -> anyhow::Result<()> {
-        let cache = launcher.mod_cache();
-
         let game_directory = config.manifest_directory().join("minecraft/");
         let mods_directory = game_directory.join("mods/");
         let source_directory = config.manifest_directory().join(SOURCE_DIR);
@@ -45,7 +43,7 @@ impl Build {
         // being placed when it isn't.
         reject_src_mods_jars(&source_directory.join("mods")).await?;
 
-        sync_mods(config, &cache, &mods_directory).await?;
+        sync_mods(config, launcher, &mods_directory).await?;
 
         // Replicate `src/` on top of `minecraft/` — always overwrites, so
         // in-place writes by mods (e.g. FML rewriting `fml.toml`) never leak
@@ -133,7 +131,7 @@ pub(super) async fn resolve_url(
 
 async fn sync_mods(
     config: &Config<'_>,
-    cache: &cart::ModCache<'_>,
+    launcher: &Launcher,
     mods_directory: &Path,
 ) -> anyhow::Result<()> {
     let expected: HashSet<String> = config
@@ -156,12 +154,12 @@ async fn sync_mods(
             curseforge_http.as_ref(),
         )
         .await?;
-        let cached = tokio::fs::try_exists(cache.path_from_url(&url)?).await?;
+        let cached = launcher.is_mod_cached(&url).await?;
         tracing::info!(
             "{action} {mod_name}",
             action = if cached { "cached  " } else { "download" },
         );
-        let source_path = cache.fetch_mod(&url).await?;
+        let source_path = launcher.fetch_mod(&url).await?;
 
         let target_path = mods_directory.join(mod_source.filename(mod_name));
 

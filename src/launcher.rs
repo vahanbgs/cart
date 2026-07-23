@@ -7,7 +7,6 @@ mod instance;
 mod java;
 mod loader;
 
-pub use cache::ModCache;
 pub use instance::Instance;
 pub use loader::{Loader, LoaderKind, LoaderSpec};
 use tempfile::TempDir;
@@ -18,6 +17,7 @@ use std::{collections::HashMap, path::PathBuf};
 use anyhow::anyhow;
 use directories_next::ProjectDirs;
 use reqwest::Client;
+use url::Url;
 
 use crate::api::{
     Endpoint,
@@ -28,6 +28,11 @@ use cache::{AssetCache, Cache};
 
 pub struct Launcher {
     cache: Cache,
+    /// Shared HTTP client for one-shot uncached GETs (Fabric loader listing,
+    /// NeoForge maven metadata). `reqwest::Client` is `Arc`-internal, so
+    /// cloning it into `Cache` and out to those callers shares the same
+    /// connection pool.
+    client: Client,
 }
 
 impl Default for Launcher {
@@ -42,9 +47,9 @@ impl Launcher {
             ProjectDirs::from("", "", "cart").expect("Could not find valid home directory path");
         let cache_dir = project_dirs.cache_dir();
         let client = Client::new();
-        let cache = Cache::new(cache_dir.to_owned(), client);
+        let cache = Cache::new(cache_dir.to_owned(), client.clone());
 
-        Self { cache }
+        Self { cache, client }
     }
 
     pub fn builder() -> LauncherBuilder {
@@ -111,8 +116,7 @@ impl Launcher {
                         LoaderSpec::Pinned(v) => v.clone(),
                         LoaderSpec::Latest => {
                             let metadata =
-                                crate::api::neoforge::MavenMetadata::fetch(self.cache.client())
-                                    .await?;
+                                crate::api::neoforge::MavenMetadata::fetch(&self.client).await?;
                             metadata.latest_stable_for_mc(version_id).ok_or_else(|| {
                                 anyhow!("no stable NeoForge release for Minecraft {version_id}")
                             })?
@@ -229,7 +233,9 @@ impl Launcher {
                     // string. Extra libs come from the profile JSON, the
                     // JVM boots KnotClient, and the modern game/jvm args
                     // are merged on top of vanilla's.
-                    let result = fabric::install(version_id, &loader.spec, &self.cache).await?;
+                    let result =
+                        fabric::install(version_id, &loader.spec, &self.cache, &self.client)
+                            .await?;
                     (
                         vanilla_client_jar,
                         result.libraries,
@@ -406,12 +412,20 @@ impl Launcher {
         Ok(())
     }
 
-    pub fn mod_cache(&self) -> ModCache<'_> {
-        ModCache::new(&self.cache)
+    /// Fetch a mod jar and return its cache path. Thin wrapper over
+    /// [`Cache::fetch`] with no expected SHA — mod URLs come from Modrinth
+    /// / CurseForge / user configs and don't carry a known digest to
+    /// verify against.
+    pub async fn fetch_mod(&self, url: &Url) -> anyhow::Result<PathBuf> {
+        self.cache.fetch(url, None).await
     }
 
-    pub fn cache(&self) -> &Cache {
-        &self.cache
+    /// Whether a mod jar for `url` is already resident in the cache.
+    /// Used by the CLI to distinguish "cached" vs "download" in build
+    /// progress logging. Racy against a concurrent writer's atomic-rename,
+    /// which is fine for logging.
+    pub async fn is_mod_cached(&self, url: &Url) -> anyhow::Result<bool> {
+        self.cache.is_cached(url).await
     }
 }
 
@@ -430,9 +444,9 @@ impl LauncherBuilder {
         });
 
         let client = Client::new();
-        let cache = Cache::new(cache_dir, client);
+        let cache = Cache::new(cache_dir, client.clone());
 
-        Launcher { cache }
+        Launcher { cache, client }
     }
 
     pub fn cache_dir(mut self, cache_dir: impl Into<PathBuf>) -> Self {

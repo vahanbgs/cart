@@ -1,8 +1,6 @@
 mod asset;
-mod mod_cache;
 
 pub use asset::AssetCache;
-pub use mod_cache::ModCache;
 
 use std::path::{Path, PathBuf};
 
@@ -31,13 +29,13 @@ impl Cache {
         &self.path
     }
 
-    /// The shared HTTP client. Exposed so callers can make uncached GETs
-    /// (e.g. Fabric's loader listing collides with the parametric profile
-    /// URL under the URL-mirrored cache layout and shouldn't be cached
-    /// anyway — new loaders release regularly and users would get stale
-    /// answers).
-    pub fn client(&self) -> &reqwest::Client {
-        &self.client
+    /// True if `url`'s target has already been persisted to the cache.
+    /// Callers use this for progress reporting ("cached" vs. "download")
+    /// before calling [`fetch`]; it doesn't touch the flock, so racing a
+    /// concurrent writer may return `false` right before that writer's
+    /// atomic-rename lands. That's fine for progress reporting.
+    pub async fn is_cached(&self, url: &Url) -> anyhow::Result<bool> {
+        Ok(fs::try_exists(self.path_from_url(url)?).await?)
     }
 
     pub async fn fetch_json<T: serde::de::DeserializeOwned>(
@@ -151,7 +149,7 @@ impl Cache {
         Ok(path)
     }
 
-    pub fn path_from_url(&self, url: &Url) -> anyhow::Result<PathBuf> {
+    pub(crate) fn path_from_url(&self, url: &Url) -> anyhow::Result<PathBuf> {
         let Origin::Tuple(_, host, _) = url.origin() else {
             bail!("Could not extract host from URL: {}", url);
         };
