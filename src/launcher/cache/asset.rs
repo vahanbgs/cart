@@ -6,6 +6,7 @@ use url::Url;
 use crate::api::piston::{AssetIndex, AssetManifest};
 use crate::launcher::fs_ops;
 use crate::parallel;
+use crate::progress::{self, IndicatifSpanExt};
 
 use super::Cache;
 
@@ -56,6 +57,9 @@ impl<'cache> AssetCache<'cache> {
 
         let virtual_directory = virtual_directory.as_ref();
         let asset_store_url = &asset_store_url;
+        let bar = progress::bar("assets", asset_manifest.objects.len() as u64);
+        bar.pb_start();
+        let bar = &bar;
         parallel::run(&asset_manifest.objects, |(name, object)| async move {
             let digest = object.hash.to_hex();
             let first_byte = hex::encode(&object.hash.as_bytes()[..1]);
@@ -75,6 +79,7 @@ impl<'cache> AssetCache<'cache> {
                 // symlink below.
                 self.cache.fetch(&url, Some(&object.hash)).await?;
             }
+            bar.pb_inc(1);
             Ok(())
         })
         .await?;
