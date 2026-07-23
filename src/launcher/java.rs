@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::Context;
+use futures::{StreamExt, TryStreamExt};
 use tempfile::TempDir;
 use tokio::{
     fs::{self, File},
@@ -25,6 +26,12 @@ use crate::api::{
 
 static MOJANG_LIBRARIES_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://libraries.minecraft.net/").unwrap());
+
+/// Max in-flight Java-runtime file fetches. A JRE distribution ships
+/// ~50 raw files (binaries, jmods, libs); the same RTT bottleneck as
+/// the asset store, at smaller N. Matches the asset-loop budget so we
+/// don't need to reason about two independent per-host caps.
+const JAVA_FETCH_CONCURRENCY: usize = 8;
 
 use super::cache::Cache;
 
@@ -61,21 +68,27 @@ pub async fn fetch_java_distribution(
 
     let java_distribution_path = cache.java_dir(java_version_component.as_ref());
 
-    for (path, fs_entry) in java_distribution.files {
-        if let FileSystemEntry::File {
-            downloads,
-            executable,
-        } = fs_entry
-        {
-            let target_path = java_distribution_path.join(path);
-            cache
-                .materialize(&downloads.raw.url, Some(&downloads.raw.sha1), &target_path)
-                .await?;
-            if executable {
-                make_executable(target_path).await?;
+    let java_distribution_path_ref = &java_distribution_path;
+    futures::stream::iter(java_distribution.files)
+        .map(|(path, fs_entry)| async move {
+            if let FileSystemEntry::File {
+                downloads,
+                executable,
+            } = fs_entry
+            {
+                let target_path = java_distribution_path_ref.join(path);
+                cache
+                    .materialize(&downloads.raw.url, Some(&downloads.raw.sha1), &target_path)
+                    .await?;
+                if executable {
+                    make_executable(target_path).await?;
+                }
             }
-        }
-    }
+            Ok::<_, anyhow::Error>(())
+        })
+        .buffer_unordered(JAVA_FETCH_CONCURRENCY)
+        .try_collect::<()>()
+        .await?;
 
     Ok(java_distribution_path)
 }
