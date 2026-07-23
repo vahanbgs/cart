@@ -24,6 +24,23 @@ pub enum LoaderType {
     NeoForge = 6,
 }
 
+/// `sortField` values used by `/v1/mods/search`. Cart pins `Popularity`
+/// for the user-facing search — the rest are listed so callers don't
+/// need to hunt the CurseForge docs for the numeric values if they ever
+/// want a different sort.
+#[derive(Clone, Copy, Debug)]
+#[repr(u32)]
+pub enum SortField {
+    Featured = 1,
+    Popularity = 2,
+    LastUpdated = 3,
+    Name = 4,
+    Author = 5,
+    TotalDownloads = 6,
+    Category = 7,
+    GameVersion = 8,
+}
+
 /// `GET /v1/mods/search?gameId=432&slug=<slug>` — narrow lookup used by
 /// `find_project_by_slug` to turn a human slug into a stable numeric
 /// project id. Not for user-visible search — that's `search_url`.
@@ -35,17 +52,22 @@ pub fn slug_search_url(slug: &str) -> Url {
     url
 }
 
-/// `GET /v1/mods/search?gameId=432&classId=6&searchFilter=<q>&pageSize=<n>`
+/// `GET /v1/mods/search?gameId=432&classId=6&searchFilter=<q>&sortField=2&sortOrder=desc&pageSize=<n>`
 /// — the mod-class subset of CurseForge's full-text search. Used by
 /// `cart curseforge search`. `classId=6` is CurseForge's "Mods" class,
 /// pinned so the query doesn't surface shader-pack / resource-pack /
-/// modpack hits.
+/// modpack hits. `sortField=2` is Popularity — without it CurseForge
+/// falls back to Featured ordering, which pushes unrelated projects
+/// above exact-slug matches (typing `jei` doesn't get JEI on top). This
+/// mirrors what CurseForge's own web UI does for the same query.
 pub fn search_url(query: &str, limit: u32) -> Url {
     let mut url = BASE_URL.join("v1/mods/search").unwrap();
     url.query_pairs_mut()
         .append_pair("gameId", &MINECRAFT_GAME_ID.to_string())
         .append_pair("classId", "6")
         .append_pair("searchFilter", query)
+        .append_pair("sortField", &(SortField::Popularity as u32).to_string())
+        .append_pair("sortOrder", "desc")
         .append_pair("pageSize", &limit.to_string());
     url
 }
@@ -203,8 +225,8 @@ pub async fn find_project_by_slug(http: &Client, slug: &str) -> anyhow::Result<M
         .with_context(|| format!("slug '{slug}' not found on CurseForge"))
 }
 
-/// Full-text mod search, capped at `limit` hits. Ordering is
-/// CurseForge's default (server-computed relevance).
+/// Full-text mod search, capped at `limit` hits. Ordered by
+/// CurseForge's `Popularity` sort descending — see `search_url` for why.
 pub async fn search(http: &Client, query: &str, limit: u32) -> anyhow::Result<Vec<SearchHit>> {
     let envelope: Envelope<Vec<SearchHit>> = http
         .get(search_url(query, limit))
