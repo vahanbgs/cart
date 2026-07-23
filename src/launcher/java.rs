@@ -78,8 +78,22 @@ pub async fn fetch_java_distribution(
 
             fs::create_dir_all(target_path.parent().unwrap()).await?;
 
-            if !fs::try_exists(&target_path).await? {
-                fs::hard_link(source_path, &target_path).await?;
+            // Race-safe: hard_link is atomic. Multiple concurrent installers
+            // of the same Java version deterministically produce identical
+            // (source, target) pairs, so EEXIST here means another caller
+            // already linked it — treat that as success rather than
+            // propagating the error, which is what the previous
+            // try_exists/then-link check was attempting non-atomically.
+            if let Err(err) = fs::hard_link(&source_path, &target_path).await
+                && err.kind() != std::io::ErrorKind::AlreadyExists
+            {
+                return Err(err).with_context(|| {
+                    format!(
+                        "hard-link {} → {}",
+                        source_path.display(),
+                        target_path.display()
+                    )
+                });
             }
 
             if executable {
