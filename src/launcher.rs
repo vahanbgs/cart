@@ -2,6 +2,7 @@ mod arguments;
 mod cache;
 pub mod fabric;
 pub mod forge;
+mod fs_ops;
 mod instance;
 mod java;
 mod loader;
@@ -160,10 +161,8 @@ impl Launcher {
                         .join("versions")
                         .join(&version.id)
                         .join(format!("{}.jar", &version.id));
-                    if !fs::try_exists(&versioned_client).await? {
-                        fs::create_dir_all(versioned_client.parent().unwrap()).await?;
-                        fs::hard_link(&vanilla_client_jar, &versioned_client).await?;
-                    }
+                    fs::create_dir_all(versioned_client.parent().unwrap()).await?;
+                    fs_ops::hard_link(&vanilla_client_jar, &versioned_client).await?;
                     let client_jar = versioned_client;
 
                     resolved_forge_family =

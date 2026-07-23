@@ -4,6 +4,7 @@ use tokio::fs;
 use url::Url;
 
 use crate::api::piston::{AssetIndex, AssetManifest};
+use crate::launcher::fs_ops;
 
 use super::Cache;
 
@@ -68,18 +69,14 @@ impl<'cache> AssetCache<'cache> {
 
             if let Some(virtual_directory) = &virtual_directory {
                 let virtual_path = virtual_directory.join(name);
-                if !fs::try_exists(&virtual_path).await? {
-                    if let Some(parent) = virtual_path.parent() {
-                        fs::create_dir_all(parent).await?;
-                    }
-                    fs::hard_link(&object_path, &virtual_path).await?;
+                if let Some(parent) = virtual_path.parent() {
+                    fs::create_dir_all(parent).await?;
                 }
+                fs_ops::hard_link(&object_path, &virtual_path).await?;
             }
         }
 
-        if !fs::try_exists(&assets_objects_path).await? {
-            fs::symlink("../resources.download.minecraft.net/", &assets_objects_path).await?;
-        }
+        fs_ops::symlink("../resources.download.minecraft.net/", &assets_objects_path).await?;
 
         Ok(())
     }
