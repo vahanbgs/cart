@@ -9,6 +9,8 @@ use reqwest::Client;
 use tokio::{fs, io};
 use url::Url;
 
+use cart::progress::{self, IndicatifSpanExt};
+
 use crate::{
     config::Config,
     manifest::{Manifest, ModDependency},
@@ -148,16 +150,19 @@ async fn sync_mods(
 
     // Each mod writes to its own uniquely-named target under
     // `mods_directory`, so the per-mod fetch + hard-link pipeline has
-    // no shared mutable state across entries. The log lines end up
-    // interleaved by completion order rather than manifest order,
-    // which is what a user watching a cold-cache build actually wants.
+    // no shared mutable state across entries. Per-mod cached/download
+    // lines are debug-level (visible with `-v`); the info-level signal
+    // is the bar.
     let manifest = config.manifest();
     let http = &http;
     let curseforge_http = curseforge_http.as_ref();
+    let bar = progress::bar("mods", manifest.mods.len() as u64);
+    bar.pb_start();
+    let bar = &bar;
     cart::parallel::run(&manifest.mods, |(mod_name, mod_source)| async move {
         let url = resolve_url(mod_source, manifest, http, curseforge_http).await?;
         let cached = launcher.is_mod_cached(&url).await?;
-        tracing::info!(
+        tracing::debug!(
             "{action} {mod_name}",
             action = if cached { "cached  " } else { "download" },
         );
@@ -172,6 +177,7 @@ async fn sync_mods(
         }
 
         fs::hard_link(source_path, target_path).await?;
+        bar.pb_inc(1);
         Ok(())
     })
     .await?;
