@@ -89,6 +89,10 @@ wip = { modrinth = "some-mod", disabled = true }           # placed as wip.jar.d
 
 The game directory is always `<manifest_dir>/minecraft/`; mods are placed in `<manifest_dir>/minecraft/mods/`. A sibling `<manifest_dir>/src/` directory, if present, is copied on top of `minecraft/` on every build — top-level jars under `src/mods/` are rejected (mods must be declared in `[mods]`).
 
+## Dependencies
+
+Don't hesitate to reach for a new crate when it's popular and makes the code meaningfully cleaner, more reliable, or more performant. Prefer a well-maintained dep over hand-rolling ANSI escapes, TTY detection, retry logic, path handling, etc. "No new dep" is not a goal in itself here.
+
 ## Testing
 
 Default `cargo test` is fully offline: serde/manifest/loader/export tests only, no cache touched. `#[ignore]`d integration tests live under `tests/`:
