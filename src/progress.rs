@@ -20,11 +20,9 @@ use tracing::Span;
 pub use tracing_indicatif::span_ext::IndicatifSpanExt;
 
 fn style() -> ProgressStyle {
-    ProgressStyle::with_template(
-        "{msg:>12.cyan.bold} [{bar:24.cyan/blue}] {pos:>4}/{len:<4}",
-    )
-    .expect("valid progress template")
-    .progress_chars("=> ")
+    ProgressStyle::with_template("{msg:>12.cyan.bold} [{bar:24.cyan/blue}] {pos:>4}/{len:<4}")
+        .expect("valid progress template")
+        .progress_chars("=> ")
 }
 
 /// Return a tracing span pre-configured as an `indicatif` bar with the

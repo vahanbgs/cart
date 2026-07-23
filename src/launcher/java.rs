@@ -248,7 +248,9 @@ pub async fn build_class_path(
                 })?;
                 let url = base
                     .join(&artifact.path.to_string_lossy())
-                    .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
+                    .with_context(|| {
+                        format!("failed to build Forge Maven URL for: {}", lib.name)
+                    })?;
                 cache.fetch(&url, Some(&artifact.sha1)).await?
             } else {
                 // Legacy format (no downloads field): build URL from lib.url base
