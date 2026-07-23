@@ -2,13 +2,14 @@
 
 A Minecraft launcher and mod manager for the command line. `cart` reads a
 `cart.toml` manifest — the analogue of `Cargo.toml` — that declares the
-Minecraft version, an optional Forge version, and a list of mods. It downloads
-everything into a local, per-project game directory and launches the game with
-the right Java runtime.
+Minecraft version, an optional mod loader (Forge, Fabric, or NeoForge),
+and a list of mods. It downloads everything into a local, per-project
+game directory and launches the game with the right Java runtime.
 
-Mods can be pulled from Modrinth by slug (pinned or loose) or from any raw URL.
-Downloads are content-addressed under `~/.cache/cart/` and SHA-1 verified, so
-switching between projects and Minecraft versions re-uses the cache.
+Mods can be pulled from Modrinth by slug, from CurseForge by numeric
+project/file id, or from any raw URL. Downloads are content-addressed
+under `~/.cache/cart/` and SHA-1 verified, so switching between projects
+and Minecraft versions re-uses the cache.
 
 ## Install
 
@@ -24,20 +25,32 @@ The binary lands at `target/release/cart`.
 ## Quick start
 
 ```sh
-cart init mypack
+cart init mypack               # interactive: pick MC version + loader
 cd mypack
-cart add jei          # newest JEI compatible with the manifest's mc version
-cart run              # download mods, then launch Minecraft
+cart mr find jei               # interactive: search Modrinth, pick, add
+cart run                       # download mods, then launch Minecraft
 ```
 
-`cart init` writes a minimal `cart.toml`; pass `--mv <version>` to seed the
-Minecraft version (defaults to `"latest"`).
+`cart init` prompts for the Minecraft version and mod loader; pass `--mv
+<version>` beforehand to skip the version prompt. `cart mr` (Modrinth)
+and `cart cf` (CurseForge) each expose `add`, `search`, and `find` — `add`
+takes a slug when you already know the exact mod, `search` prints hits to
+stdout, and `find` is the interactive picker. CurseForge subcommands
+require a `CURSEFORGE_API_KEY` in the environment.
 
 ## Manifest format
 
 ```toml
 minecraft = "1.20.1"
-forge = "47.2.0"          # optional; presence switches the loader to Forge
+
+# Loader is optional. A bare string picks the latest build of that loader:
+# loader = "fabric"
+# loader = "forge"
+# loader = "neoforge"
+# Or pin a specific build:
+# loader = { forge = "recommended" }        # Forge stable channel
+# loader = { fabric = "0.15.7" }            # pinned Fabric loader
+loader = { forge = "47.2.0" }
 
 [mods]
 # Modrinth, pinned to a specific version_number:
@@ -46,6 +59,11 @@ jei = { modrinth = "jei", version = "15.2.0.27" }
 # Modrinth, loose — resolved to the newest compatible version at build time:
 appleskin = { modrinth = "appleskin" }
 
+# CurseForge — always pinned to a (project id, file id) pair.
+# `cart cf add <slug>` and `cart cf find` resolve slugs and write these
+# ids for you; CurseForge slugs can rename, ids are permanent.
+create = { curseforge = 328085, file = 6116881 }
+
 # Raw URL — fully user-pinned; cart update skips these:
 custom = { url = "https://example.com/CustomMod.jar" }
 
@@ -53,24 +71,28 @@ custom = { url = "https://example.com/CustomMod.jar" }
 wip = { modrinth = "some-mod", disabled = true }
 ```
 
-The manifest directory also owns a `src/` tree that mirrors the `.minecraft/`
-layout. Every `cart build` replicates `src/` on top of `minecraft/`, so
-pack-authored configs, resource packs, or scripts live in version control
-alongside the manifest. Top-level jars in `src/mods/` are rejected — mods
-belong in `[mods]`.
+The manifest directory also owns a `src/` tree that mirrors the
+`.minecraft/` layout. Every `cart build` replicates `src/` on top of
+`minecraft/`, so pack-authored configs, resource packs, or scripts live
+in version control alongside the manifest. Top-level jars in `src/mods/`
+are rejected — mods belong in `[mods]`.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `cart init <path>` | Create a new project directory containing `cart.toml`. |
-| `cart add <slug>` | Add a Modrinth mod. `--version` pins; `--name` overrides the manifest key; `--disabled` adds it disabled. |
+| `cart init <path>` | Interactive project setup — prompts for Minecraft version and mod loader, writes `cart.toml`. |
+| `cart mr add <slug>` | Add a Modrinth mod. `--version` pins; `--name` overrides the manifest key; `--disabled` adds it disabled. |
+| `cart mr search <query>` | List top Modrinth matches for `<query>`. |
+| `cart mr find <query>` | Interactive: search Modrinth, pick from the menu, add to the manifest. |
+| `cart cf add <slug>` / `cf search <query>` / `cf find <query>` | The same three verbs against CurseForge. Requires `CURSEFORGE_API_KEY`. |
 | `cart remove <name>` | Remove a mod entry from `[mods]`. |
 | `cart enable <name>` / `cart disable <name>` | Flip the `disabled` flag on an entry. |
-| `cart update [names...]` | Re-resolve Modrinth entries against the current Minecraft version and rewrite the pinned `version`. URL entries are skipped. |
-| `cart list` | Print `[mods]` as a table (name, source, version, disabled). |
+| `cart update [names...]` | Re-resolve Modrinth and CurseForge entries against the current Minecraft version and rewrite the pinned version/file. URL entries are skipped. |
+| `cart list` | Print `[mods]` as a table. |
 | `cart build` | Download mods into `minecraft/mods/` and copy `src/` over `minecraft/`. |
 | `cart run` | `build`, then launch Minecraft with the bundled Java runtime. |
+| `cart export <format>` | Package the pack as `mrpack`, `curseforge`, or `prism` for redistribution. |
 
 Global flags:
 
@@ -92,6 +114,6 @@ mypack/
     └── …
 ```
 
-The cache lives at `~/.cache/cart/` and holds Minecraft version manifests, the
-Java runtime, library and native jars, asset objects, and mod jars — all
-content-addressed and SHA-1 verified.
+The cache lives at `~/.cache/cart/` and holds Minecraft version manifests,
+the Java runtime, library and native jars, asset objects, and mod jars —
+all content-addressed and SHA-1 verified.
