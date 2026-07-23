@@ -7,7 +7,6 @@ use std::{
 };
 
 use anyhow::Context;
-use futures::{StreamExt, TryStreamExt};
 use tempfile::TempDir;
 use tokio::{
     fs::{self, File},
@@ -27,20 +26,8 @@ use crate::api::{
 static MOJANG_LIBRARIES_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://libraries.minecraft.net/").unwrap());
 
-/// Max in-flight Java-runtime file fetches. A JRE distribution ships
-/// ~50 raw files (binaries, jmods, libs); the same RTT bottleneck as
-/// the asset store, at smaller N. Matches the asset-loop budget so we
-/// don't need to reason about two independent per-host caps.
-const JAVA_FETCH_CONCURRENCY: usize = 8;
-
-/// Max in-flight classpath library fetches. Covers both the vanilla
-/// library list (10–40 jars from `libraries.minecraft.net`) and the
-/// loader "extras" (Fabric / Forge / NeoForge, another 10–20). We use
-/// order-preserving `buffered(N)` here — classpath entry position and
-/// same-key replacement semantics both depend on original list order.
-const CLASSPATH_FETCH_CONCURRENCY: usize = 8;
-
 use super::cache::Cache;
+use super::parallel;
 
 async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
     fs::set_permissions(path, Permissions::from_mode(0o755)).await?;
@@ -76,26 +63,23 @@ pub async fn fetch_java_distribution(
     let java_distribution_path = cache.java_dir(java_version_component.as_ref());
 
     let java_distribution_path_ref = &java_distribution_path;
-    futures::stream::iter(java_distribution.files)
-        .map(|(path, fs_entry)| async move {
-            if let FileSystemEntry::File {
-                downloads,
-                executable,
-            } = fs_entry
-            {
-                let target_path = java_distribution_path_ref.join(path);
-                cache
-                    .materialize(&downloads.raw.url, Some(&downloads.raw.sha1), &target_path)
-                    .await?;
-                if executable {
-                    make_executable(target_path).await?;
-                }
+    parallel::run(java_distribution.files, |(path, fs_entry)| async move {
+        if let FileSystemEntry::File {
+            downloads,
+            executable,
+        } = fs_entry
+        {
+            let target_path = java_distribution_path_ref.join(path);
+            cache
+                .materialize(&downloads.raw.url, Some(&downloads.raw.sha1), &target_path)
+                .await?;
+            if executable {
+                make_executable(target_path).await?;
             }
-            Ok::<_, anyhow::Error>(())
-        })
-        .buffer_unordered(JAVA_FETCH_CONCURRENCY)
-        .try_collect::<()>()
-        .await?;
+        }
+        Ok(())
+    })
+    .await?;
 
     Ok(java_distribution_path)
 }
@@ -142,61 +126,58 @@ pub async fn build_class_path(
     // depending on the library entry shape and rules).
     type FetchedVanilla = (Option<(String, String)>, Option<PathBuf>);
     let vanilla_fetched: Vec<FetchedVanilla> =
-        futures::stream::iter(&version_manifest.libraries)
-            .map(|library_entry| async move {
-                let mut allow = library_entry.rules.is_none();
+        parallel::collect(&version_manifest.libraries, |library_entry| async move {
+            let mut allow = library_entry.rules.is_none();
 
-                if let Some(rules) = &library_entry.rules {
-                    allow = rules.is_empty();
+            if let Some(rules) = &library_entry.rules {
+                allow = rules.is_empty();
 
-                    for rule in rules {
-                        let mut rule_applies = true;
+                for rule in rules {
+                    let mut rule_applies = true;
 
-                        if let Some(os) = &rule.os {
-                            rule_applies &= match os {
-                                Os::Arch { arch: _ } => true,
-                                Os::Name { name } => name.matches_current_platform(),
-                            }
-                        }
-
-                        rule_applies &= rule.features.is_none();
-
-                        if rule_applies {
-                            allow = rule.action == Action::Allow;
+                    if let Some(os) = &rule.os {
+                        rule_applies &= match os {
+                            Os::Arch { arch: _ } => true,
+                            Os::Name { name } => name.matches_current_platform(),
                         }
                     }
+
+                    rule_applies &= rule.features.is_none();
+
+                    if rule_applies {
+                        allow = rule.action == Action::Allow;
+                    }
                 }
+            }
 
-                if !allow {
-                    return Ok::<_, anyhow::Error>((None, None));
-                }
+            if !allow {
+                return Ok((None, None));
+            }
 
-                let cp = if let Some(artifact) = &library_entry.downloads.artifact
-                    && let Some(url) = &artifact.url
-                {
-                    let path = cache.fetch(url, Some(&artifact.sha1)).await?;
-                    Some((
-                        dedup_key(&library_entry.name),
-                        path.to_string_lossy().into_owned(),
-                    ))
-                } else {
-                    None
-                };
+            let cp = if let Some(artifact) = &library_entry.downloads.artifact
+                && let Some(url) = &artifact.url
+            {
+                let path = cache.fetch(url, Some(&artifact.sha1)).await?;
+                Some((
+                    dedup_key(&library_entry.name),
+                    path.to_string_lossy().into_owned(),
+                ))
+            } else {
+                None
+            };
 
-                let native_jar = if let Some(native) = &library_entry.downloads.classifiers
-                    && let Some(native) = native.get(&NativeClassifier::current())
-                    && let Some(url) = &native.url
-                {
-                    Some(cache.fetch(url, Some(&native.sha1)).await?)
-                } else {
-                    None
-                };
+            let native_jar = if let Some(native) = &library_entry.downloads.classifiers
+                && let Some(native) = native.get(&NativeClassifier::current())
+                && let Some(url) = &native.url
+            {
+                Some(cache.fetch(url, Some(&native.sha1)).await?)
+            } else {
+                None
+            };
 
-                Ok((cp, native_jar))
-            })
-            .buffered(CLASSPATH_FETCH_CONCURRENCY)
-            .try_collect()
-            .await?;
+            Ok((cp, native_jar))
+        })
+        .await?;
 
     // Apply phase: sequential, in original order. `add_classpath_entry`
     // relies on insertion order for classpath position + same-key
@@ -215,10 +196,10 @@ pub async fn build_class_path(
 
     // Same shape as vanilla: parallel fetch, sequential apply. Order
     // preservation matters for the same dedup reasons.
-    let extras_fetched: Vec<Option<(String, String)>> = futures::stream::iter(extra_libraries)
-        .map(|lib| async move {
+    let extras_fetched: Vec<Option<(String, String)>> =
+        parallel::collect(extra_libraries, |lib| async move {
             if lib.clientreq == Some(false) {
-                return Ok::<_, anyhow::Error>(None);
+                return Ok(None);
             }
 
             let path = if let Some(url) =
@@ -260,8 +241,6 @@ pub async fn build_class_path(
                 path.to_string_lossy().into_owned(),
             )))
         })
-        .buffered(CLASSPATH_FETCH_CONCURRENCY)
-        .try_collect()
         .await?;
 
     for (key, path) in extras_fetched.into_iter().flatten() {
