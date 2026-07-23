@@ -467,11 +467,13 @@ impl Launcher {
 }
 
 /// Read `reader` line-by-line and re-emit each line as a
-/// `tracing::trace!` event. `target` selects between
-/// `"minecraft.stdout"` and `"minecraft.stderr"` so the subscriber can
-/// filter them independently. Runs until EOF; ignores line-level I/O
-/// errors so a broken pipe on child exit doesn't propagate.
-async fn forward_lines<R: AsyncRead + Unpin>(reader: R, target: &'static str) {
+/// `tracing::trace!` event under one of a fixed set of targets so the
+/// subscriber can filter them independently. Runs until EOF; ignores
+/// line-level I/O errors so a broken pipe on child exit doesn't
+/// propagate. Used both by [`Launcher::launch`] (MC itself) and by
+/// the Forge processor pipeline (install-time subprocesses like
+/// SpecialSource / installertools).
+pub(crate) async fn forward_lines<R: AsyncRead + Unpin>(reader: R, target: &'static str) {
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         // `target:` on the macro form has to be a literal, so we

@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     io::Read,
     path::{Path, PathBuf},
+    process::Stdio,
     sync::LazyLock,
 };
 
@@ -486,13 +487,37 @@ async fn run_processors(
             }
         }
 
-        let status = Command::new(java_path.join("bin").join("java"))
+        // Pipe processor stdout/stderr through the shared line-forwarder
+        // so noisy Java tools (SpecialSource: "Reading X.jar", "Patching
+        // Y…") don't leak into cart's terminal. Same `minecraft::stdout`
+        // / `minecraft::stderr` targets as the game itself — silenced by
+        // default, opted back in by `cart -vv run`.
+        let mut child = Command::new(java_path.join("bin").join("java"))
             .arg("-cp")
             .arg(classpath.join(":"))
             .arg(&main_class)
             .args(&args)
-            .status()
-            .await?;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let stdout_task = child
+            .stdout
+            .take()
+            .map(|s| tokio::spawn(super::forward_lines(s, "minecraft::stdout")));
+        let stderr_task = child
+            .stderr
+            .take()
+            .map(|s| tokio::spawn(super::forward_lines(s, "minecraft::stderr")));
+
+        let status = child.wait().await?;
+
+        if let Some(task) = stdout_task {
+            let _ = task.await;
+        }
+        if let Some(task) = stderr_task {
+            let _ = task.await;
+        }
 
         if !status.success() {
             bail!("Forge processor {} exited with {status}", processor.jar);
