@@ -4,7 +4,8 @@ use tokio::fs;
 use url::Url;
 
 use crate::api::piston::{AssetIndex, AssetManifest};
-use crate::launcher::{fs_ops, parallel};
+use crate::launcher::fs_ops;
+use crate::parallel;
 
 use super::Cache;
 

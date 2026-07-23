@@ -27,7 +27,7 @@ static MOJANG_LIBRARIES_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://libraries.minecraft.net/").unwrap());
 
 use super::cache::Cache;
-use super::parallel;
+use crate::parallel;
 
 async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
     fs::set_permissions(path, Permissions::from_mode(0o755)).await?;

@@ -6,7 +6,6 @@ mod fs_ops;
 mod instance;
 mod java;
 mod loader;
-mod parallel;
 
 pub use instance::Instance;
 pub use loader::{Loader, LoaderKind, LoaderSpec};
