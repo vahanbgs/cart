@@ -16,25 +16,36 @@
         };
       in
       {
-        # packages.default = pkgs.rustPlatform.buildRustPackage {
-        #   pname = "cart";
-        #   version = "0.1.0";
-        #   src = ./.;
+        packages.default = pkgs.rustPlatform.buildRustPackage {
+          pname = "cart";
+          version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
+          src = ./.;
 
-        #   cargoHash = "sha256-FWLHdHv+EJ5PYP1TTCN3G10RDDTGAnugBSQ2eYemKCs=";
+          cargoLock.lockFile = ./Cargo.lock;
 
-        #   nativeBuildInputs = with pkgs; [
-        #     installShellFiles
-        #   ];
+          nativeBuildInputs = with pkgs; [
+            cmake
+            installShellFiles
+            perl
+          ];
 
-        #   postInstall = ''
-        #     installShellCompletion --cmd cart \
-        #       --bash target/*/build/cart-*/out/cart.bash \
-        #       --zsh target/*/build/cart-*/out/_cart \
-        #       --fish target/*/build/cart-*/out/cart.fish \
-        #       --nushell target/*/build/cart-*/out/cart.nu
-        #   '';
-        # };
+          env.SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+
+          postInstall = ''
+            out_dir=$(find target -type d -path '*/build/cart-*/out' | head -1)
+            installShellCompletion --cmd cart \
+              --bash "$out_dir/cart.bash" \
+              --zsh  "$out_dir/_cart" \
+              --fish "$out_dir/cart.fish" \
+              --nushell "$out_dir/cart.nu"
+          '';
+
+          meta = {
+            description = "Minecraft launcher and mod manager";
+            mainProgram = "cart";
+            platforms = pkgs.lib.platforms.unix;
+          };
+        };
 
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
