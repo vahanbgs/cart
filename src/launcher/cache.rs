@@ -61,6 +61,26 @@ impl Cache {
         Ok(fs::try_exists(self.path_from_url(url)?).await?)
     }
 
+    /// Fetch `url` into the cache (or find it there) and hard-link the
+    /// cache entry to `into`. Consolidates the "download once, place at
+    /// one or more targets" pattern used by the Java runtime layout, the
+    /// asset virtual dir, and NeoForge's versioned client alias. Parent
+    /// directories of `into` are created if missing, and a pre-existing
+    /// `into` with the correct source is treated as success by
+    /// [`super::fs_ops::hard_link`].
+    pub async fn materialize(
+        &self,
+        url: &Url,
+        expected_digest: Option<&Sha1Digest>,
+        into: &Path,
+    ) -> anyhow::Result<()> {
+        let source = self.fetch(url, expected_digest).await?;
+        if let Some(parent) = into.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        super::fs_ops::hard_link(&source, into).await
+    }
+
     pub async fn fetch_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &Url,

@@ -15,7 +15,6 @@ use tokio::{
 use url::Url;
 use zip::ZipArchive;
 
-use super::fs_ops;
 use crate::api::{
     forge::MavenCoordinate,
     piston::{
@@ -68,15 +67,10 @@ pub async fn fetch_java_distribution(
             executable,
         } = fs_entry
         {
-            let source_path = cache
-                .fetch(&downloads.raw.url, Some(&downloads.raw.sha1))
-                .await?;
-
             let target_path = java_distribution_path.join(path);
-
-            fs::create_dir_all(target_path.parent().unwrap()).await?;
-            fs_ops::hard_link(&source_path, &target_path).await?;
-
+            cache
+                .materialize(&downloads.raw.url, Some(&downloads.raw.sha1), &target_path)
+                .await?;
             if executable {
                 make_executable(target_path).await?;
             }

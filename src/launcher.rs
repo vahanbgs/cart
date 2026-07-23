@@ -164,8 +164,16 @@ impl Launcher {
                         .versions_dir()
                         .join(&version.id)
                         .join(format!("{}.jar", &version.id));
-                    fs::create_dir_all(versioned_client.parent().unwrap()).await?;
-                    fs_ops::hard_link(&vanilla_client_jar, &versioned_client).await?;
+                    // materialize is a cache-hit here (we already fetched
+                    // the client jar into `vanilla_client_jar`); it just
+                    // hard-links the cached path into the versioned alias.
+                    self.cache
+                        .materialize(
+                            &version.downloads.client.url,
+                            Some(&version.downloads.client.sha1),
+                            &versioned_client,
+                        )
+                        .await?;
                     let client_jar = versioned_client;
 
                     resolved_forge_family =

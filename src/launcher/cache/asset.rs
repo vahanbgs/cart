@@ -56,23 +56,21 @@ impl<'cache> AssetCache<'cache> {
         for (name, object) in &asset_manifest.objects {
             let digest = object.hash.to_hex();
             let first_byte = hex::encode(&object.hash.as_bytes()[..1]);
-
-            let object_path = self
-                .cache
-                .fetch(
-                    &asset_store_url
-                        .join(&format!("{}/", &first_byte))?
-                        .join(&digest)?,
-                    Some(&object.hash),
-                )
-                .await?;
+            let url = asset_store_url
+                .join(&format!("{}/", &first_byte))?
+                .join(&digest)?;
 
             if let Some(virtual_directory) = &virtual_directory {
                 let virtual_path = virtual_directory.join(name);
-                if let Some(parent) = virtual_path.parent() {
-                    fs::create_dir_all(parent).await?;
-                }
-                fs_ops::hard_link(&object_path, &virtual_path).await?;
+                self.cache
+                    .materialize(&url, Some(&object.hash), &virtual_path)
+                    .await?;
+            } else {
+                // Legacy asset indexes flag virtual materialization; modern
+                // ones don't — but we still need to pull the object into the
+                // cache so the game can resolve it via the assets/objects
+                // symlink below.
+                self.cache.fetch(&url, Some(&object.hash)).await?;
             }
         }
 
