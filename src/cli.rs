@@ -5,6 +5,7 @@ mod curseforge;
 mod disable;
 mod enable;
 mod export;
+mod hit_view;
 mod init;
 mod list;
 mod modrinth;

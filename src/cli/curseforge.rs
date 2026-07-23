@@ -1,8 +1,5 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Context;
 use cart::api::curseforge;
-use inquire::Select;
 use reqwest::Client;
 
 use crate::{config::Config, manifest};
@@ -10,6 +7,7 @@ use crate::{config::Config, manifest};
 use super::{
     Cli, Curseforge, CurseforgeCommand,
     args::curseforge::{Add, Find, Search},
+    hit_view,
 };
 
 /// Env var holding the CurseForge API key. Only read when a CurseForge
@@ -95,22 +93,8 @@ impl Search {
             return Ok(());
         }
 
-        let slug_width = hits.iter().map(|h| h.slug.len()).max().unwrap_or(0);
-        let name_width = hits.iter().map(|h| h.name.len()).max().unwrap_or(0);
-        let downloads_labels: Vec<String> = hits
-            .iter()
-            .map(|h| format_downloads(h.download_count))
-            .collect();
-        let downloads_width = downloads_labels.iter().map(|s| s.len()).max().unwrap_or(0);
-
-        for (hit, downloads) in hits.iter().zip(downloads_labels.iter()) {
-            let summary = truncate(&hit.summary, 60);
-            println!(
-                "{slug:<slug_width$}  {name:<name_width$}  {downloads:>downloads_width$}  {summary}",
-                slug = hit.slug,
-                name = hit.name,
-            );
-        }
+        let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();
+        hit_view::print_search_results(&rows);
 
         Ok(())
     }
@@ -130,86 +114,16 @@ impl Find {
             return Ok(());
         }
 
-        let choices = HitChoice::from_hits(hits);
-
+        let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();
         let page_size = self.limit.min(15) as usize;
-        let picked = tokio::task::spawn_blocking(move || {
-            Select::new("Add which mod?", choices)
-                .with_page_size(page_size)
-                .with_help_message("↑↓ navigate • type to filter • enter to select")
-                .prompt()
-        })
-        .await??;
+        let picked = hit_view::pick_hit(rows, "Add which mod?", page_size).await?;
 
         let add = Add {
-            slug: picked.hit.slug.clone(),
+            slug: picked.slug,
             version: None,
             name: None,
             disabled: self.disabled,
         };
         add.run(cli).await
-    }
-}
-
-/// Pre-formatted aligned label wrapping a `SearchHit` — inquire filters
-/// by the Display output, so pre-aligning lets users type against
-/// slug/name in one string without inquire re-formatting per keystroke.
-struct HitChoice {
-    hit: curseforge::SearchHit,
-    label: String,
-}
-
-impl HitChoice {
-    fn from_hits(hits: Vec<curseforge::SearchHit>) -> Vec<Self> {
-        let slug_width = hits.iter().map(|h| h.slug.len()).max().unwrap_or(0);
-        let name_width = hits.iter().map(|h| h.name.len()).max().unwrap_or(0);
-        let downloads_labels: Vec<String> = hits
-            .iter()
-            .map(|h| format_downloads(h.download_count))
-            .collect();
-        let downloads_width = downloads_labels.iter().map(|s| s.len()).max().unwrap_or(0);
-
-        hits.into_iter()
-            .zip(downloads_labels)
-            .map(|(hit, downloads)| {
-                let summary = truncate(&hit.summary, 60);
-                let label = format!(
-                    "{slug:<slug_width$}  {name:<name_width$}  {downloads:>downloads_width$}  {summary}",
-                    slug = hit.slug,
-                    name = hit.name,
-                );
-                HitChoice { hit, label }
-            })
-            .collect()
-    }
-}
-
-impl Display for HitChoice {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.label)
-    }
-}
-
-/// Compact download counts: `77.0M`, `31.8k`, `310`. Same shape as
-/// `mr search` so both trees read the same at a glance.
-fn format_downloads(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}k", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
-    }
-}
-
-/// Truncate on character boundaries — CurseForge summaries can contain
-/// multi-byte characters and a byte-based slice would panic.
-fn truncate(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        s.to_owned()
-    } else {
-        let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
-        out.push('…');
-        out
     }
 }
