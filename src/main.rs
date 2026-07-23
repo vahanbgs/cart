@@ -13,10 +13,13 @@ use manifest::Manifest;
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    // `minecraft.stdout`/`minecraft.stderr` are trace-level events
+    // emitted by the launcher forwarding the game's fd 1/2. Silenced
+    // by default; `-vv` opts them into the terminal.
     let default_filter = match cli.verbose {
-        0 => "cart=info",
-        1 => "cart=debug",
-        _ => "cart=trace",
+        0 => "cart=info,minecraft=off",
+        1 => "cart=debug,minecraft=off",
+        _ => "cart=trace,minecraft=trace",
     };
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));

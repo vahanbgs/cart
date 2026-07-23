@@ -10,9 +10,13 @@ mod loader;
 pub use instance::Instance;
 pub use loader::{Loader, LoaderKind, LoaderSpec};
 use tempfile::TempDir;
-use tokio::{fs, process::Command};
+use tokio::{
+    fs,
+    io::{AsyncBufReadExt, AsyncRead, BufReader},
+    process::Command,
+};
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, process::Stdio};
 
 use anyhow::anyhow;
 use directories_next::ProjectDirs;
@@ -407,10 +411,36 @@ impl Launcher {
     /// non-zero exit is logged but not surfaced — Minecraft prints
     /// crashes to `logs/latest.log`, and callers of `run` shouldn't get
     /// an error just because the user closed the game.
+    ///
+    /// Minecraft's stdout/stderr are piped rather than inherited: each
+    /// line is re-emitted as a `tracing::trace!` event under the
+    /// `minecraft::stdout` / `minecraft::stderr` targets. The default
+    /// filter (see `main.rs`) drops those, so cart's terminal stays
+    /// clean. `cart -vv run` opts them back in.
     pub async fn launch(&self, instance: &Instance) -> anyhow::Result<()> {
         let (mut command, _natives_directory) = self.build_command(instance).await?;
 
-        let status = command.status().await?;
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = command.spawn()?;
+
+        let stdout_task = child
+            .stdout
+            .take()
+            .map(|s| tokio::spawn(forward_lines(s, "minecraft::stdout")));
+        let stderr_task = child
+            .stderr
+            .take()
+            .map(|s| tokio::spawn(forward_lines(s, "minecraft::stderr")));
+
+        let status = child.wait().await?;
+
+        if let Some(task) = stdout_task {
+            let _ = task.await;
+        }
+        if let Some(task) = stderr_task {
+            let _ = task.await;
+        }
+
         if !status.success() {
             let log_path = instance.directory().join("logs").join("latest.log");
             tracing::warn!("minecraft exited with {status}; see {}", log_path.display());
@@ -433,6 +463,24 @@ impl Launcher {
     /// which is fine for logging.
     pub async fn is_mod_cached(&self, url: &Url) -> anyhow::Result<bool> {
         self.cache.is_cached(url).await
+    }
+}
+
+/// Read `reader` line-by-line and re-emit each line as a
+/// `tracing::trace!` event. `target` selects between
+/// `"minecraft.stdout"` and `"minecraft.stderr"` so the subscriber can
+/// filter them independently. Runs until EOF; ignores line-level I/O
+/// errors so a broken pipe on child exit doesn't propagate.
+async fn forward_lines<R: AsyncRead + Unpin>(reader: R, target: &'static str) {
+    let mut lines = BufReader::new(reader).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        // `target:` on the macro form has to be a literal, so we
+        // dispatch here per known target.
+        match target {
+            "minecraft::stdout" => tracing::trace!(target: "minecraft::stdout", "{line}"),
+            "minecraft::stderr" => tracing::trace!(target: "minecraft::stderr", "{line}"),
+            _ => tracing::trace!(target: "minecraft", "{line}"),
+        }
     }
 }
 
