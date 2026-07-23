@@ -22,6 +22,7 @@ const PATCHED_DATA_KEY: &str = "PATCHED";
 
 use super::cache::Cache;
 use crate::parallel;
+use crate::progress::{self, IndicatifSpanExt};
 
 pub static FORGE_MAVEN_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://maven.minecraftforge.net/").unwrap());
@@ -322,9 +323,13 @@ async fn download_and_resolve(
     installer_path: &Path,
     cache: &Cache,
 ) -> anyhow::Result<(HashMap<String, PathBuf>, HashMap<String, PathBuf>)> {
+    let bar = progress::bar("forge deps", profile.libraries.len() as u64);
+    bar.pb_start();
+    let bar = &bar;
     let lib_paths: HashMap<String, PathBuf> =
         parallel::collect(&profile.libraries, |lib| async move {
             let Some(artifact) = &lib.downloads.artifact else {
+                bar.pb_inc(1);
                 return Ok(None);
             };
 
@@ -343,6 +348,7 @@ async fn download_and_resolve(
                 cache.path_from_url(&jar_url)?
             };
 
+            bar.pb_inc(1);
             Ok(Some((lib.name.clone(), path)))
         })
         .await?
