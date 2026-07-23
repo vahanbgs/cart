@@ -3,7 +3,8 @@ mod config;
 mod manifest;
 
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
+use tracing_indicatif::IndicatifLayer;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use cli::{Cli, Subcommands};
 use manifest::Manifest;
@@ -20,12 +21,20 @@ async fn main() -> anyhow::Result<()> {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
+    // `IndicatifLayer` owns a `MultiProgress` and provides a writer that
+    // suspends bar rendering around each write, so `tracing::info!`/etc.
+    // interleave cleanly above active bars.
+    let indicatif_layer = IndicatifLayer::new();
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_writer(indicatif_layer.get_stderr_writer())
         .without_time()
         .with_target(false)
-        .compact()
+        .compact();
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .with(indicatif_layer)
         .init();
 
     match &cli.command {

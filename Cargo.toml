@@ -17,6 +17,7 @@ directories-next = "2.0.0"
 fs4 = "0.13"
 futures = "0.3.32"
 hex = { version = "0.4.3", features = ["serde"] }
+indicatif = "0.18"
 inquire = "0.9.4"
 reqwest = { version = "0.13.4", features = ["json", "stream"] }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -29,6 +30,7 @@ tokio = { version = "1.52.3", features = ["full"] }
 toml = "1.1.3"
 toml_edit = "0.25"
 tracing = "0.1.44"
+tracing-indicatif = "0.3"
 tracing-subscriber = { version = "0.3.23", features = ["chrono", "json", "serde", "serde_json", "tracing", "tracing-serde", "fmt", "env-filter", "regex"] }
 url = { version = "2.5.8", features = ["serde"] }
 zip = "8.6.0"
