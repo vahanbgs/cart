@@ -146,14 +146,16 @@ async fn sync_mods(
     let http = Client::new();
     let curseforge_http = build_curseforge_client_if_needed(config.manifest())?;
 
-    for (mod_name, mod_source) in &config.manifest().mods {
-        let url = resolve_url(
-            mod_source,
-            config.manifest(),
-            &http,
-            curseforge_http.as_ref(),
-        )
-        .await?;
+    // Each mod writes to its own uniquely-named target under
+    // `mods_directory`, so the per-mod fetch + hard-link pipeline has
+    // no shared mutable state across entries. The log lines end up
+    // interleaved by completion order rather than manifest order,
+    // which is what a user watching a cold-cache build actually wants.
+    let manifest = config.manifest();
+    let http = &http;
+    let curseforge_http = curseforge_http.as_ref();
+    cart::parallel::run(&manifest.mods, |(mod_name, mod_source)| async move {
+        let url = resolve_url(mod_source, manifest, http, curseforge_http).await?;
         let cached = launcher.is_mod_cached(&url).await?;
         tracing::info!(
             "{action} {mod_name}",
@@ -170,7 +172,9 @@ async fn sync_mods(
         }
 
         fs::hard_link(source_path, target_path).await?;
-    }
+        Ok(())
+    })
+    .await?;
 
     Ok(())
 }
