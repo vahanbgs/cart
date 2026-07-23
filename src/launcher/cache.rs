@@ -3,6 +3,7 @@ mod asset;
 pub use asset::AssetCache;
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, bail};
 use fs4::fs_std::FileExt;
@@ -14,6 +15,13 @@ use tokio::{fs, io::AsyncWriteExt};
 use url::{Origin, Url};
 
 use crate::Sha1Digest;
+
+/// TTL applied to mutable JSON manifests (the top-level Mojang version list,
+/// Mojang's Java-runtime index, Forge's promotions channel). Content-addressed
+/// resources — anything fetched with an `expected_digest` — stay cached
+/// forever; only these few "list of everything" endpoints need refresh so
+/// long-lived cart installs pick up new Minecraft/Java/Forge releases.
+pub const MANIFEST_MAX_AGE: Duration = Duration::from_secs(6 * 60 * 60);
 
 pub struct Cache {
     path: PathBuf,
@@ -74,7 +82,7 @@ impl Cache {
         expected_digest: Option<&Sha1Digest>,
         into: &Path,
     ) -> anyhow::Result<()> {
-        let source = self.fetch(url, expected_digest).await?;
+        let source = self.fetch(url, expected_digest, None).await?;
         if let Some(parent) = into.parent() {
             fs::create_dir_all(parent).await?;
         }
@@ -85,22 +93,36 @@ impl Cache {
         &self,
         url: &Url,
         expected_digest: Option<&Sha1Digest>,
+        max_age: Option<Duration>,
     ) -> anyhow::Result<T> {
-        let path = self.fetch(url, expected_digest).await?;
+        let path = self.fetch(url, expected_digest, max_age).await?;
 
         Ok(serde_json::from_str(&fs::read_to_string(path).await?)?)
     }
 
+    /// `max_age = None` — warm cache is trusted forever (the default for
+    /// content-addressed resources: client JARs, libraries, assets,
+    /// SHA-1-verified manifests).
+    ///
+    /// `max_age = Some(ttl)` — before returning a cached entry we `stat`
+    /// its mtime and re-fetch if it's older than `ttl`. On network error
+    /// with a stale copy present, we log a warning and serve the stale
+    /// copy (offline / Mojang-outage tolerance). This is opt-in per call
+    /// site and used only for the handful of URL-mutable JSON manifests
+    /// listed in [`MANIFEST_MAX_AGE`].
     pub async fn fetch(
         &self,
         url: &Url,
         expected_digest: Option<&Sha1Digest>,
+        max_age: Option<Duration>,
     ) -> anyhow::Result<PathBuf> {
         let path = self.path_from_url(url)?;
 
-        // Warm-cache fast path: if the target is already there, skip the
-        // flock entirely and keep the hot path at a single `stat`.
-        if fs::try_exists(&path).await? {
+        // Warm-cache fast path: if the target is already there and (for
+        // TTL-tracked resources) still fresh, skip the flock entirely and
+        // keep the hot path at a single `stat`. `is_stale` also does a
+        // `stat`, so the fresh-cached case is two syscalls at most.
+        if fs::try_exists(&path).await? && !is_stale(&path, max_age).await? {
             tracing::debug!("Fetched '{url}' from the cache");
             return Ok(path);
         }
@@ -144,48 +166,76 @@ impl Cache {
 
         // Re-check under the lock: another writer may have completed the
         // download while we blocked, and redoing the work would just churn
-        // the target with identical bytes.
-        if fs::try_exists(&path).await? {
+        // the target with identical bytes. Under TTL, that refresh also
+        // counts — no need to re-fetch if we lost the race to a peer that
+        // already brought the file in-window.
+        if fs::try_exists(&path).await? && !is_stale(&path, max_age).await? {
             tracing::debug!("Fetched '{url}' from the cache");
             return Ok(path);
         }
 
-        let response = self
-            .client
-            .get(url.clone())
-            .send()
-            .await?
-            .error_for_status()?;
+        // Everything in the network path is fallible; a `reqwest` error
+        // for a TTL-tracked URL should not fail the whole run when we
+        // still have a slightly-stale copy on disk. Route all downstream
+        // errors through a single `Err` arm and consult the fallback
+        // there.
+        let network_result: anyhow::Result<NamedTempFile> = async {
+            let response = self
+                .client
+                .get(url.clone())
+                .send()
+                .await?
+                .error_for_status()?;
 
-        // Stream into a uniquely-named sibling of `path` and atomically
-        // rename it into place once the digest verifies. The flock makes
-        // this a single-writer critical section, so the temp file's real
-        // job here is crash safety: readers never see a half-written
-        // target, and any early exit drops the `TempPath` which unlinks
-        // the partial file — no `.tmp` litter left behind.
-        let temp_path = NamedTempFile::new_in(parent_directory_path)?.into_temp_path();
-        let mut file = fs::File::create(&temp_path).await?;
-        let mut stream = response.bytes_stream();
-        let mut hasher = Sha1::new();
+            // Stream into a uniquely-named sibling of `path` and atomically
+            // rename it into place once the digest verifies. The flock makes
+            // this a single-writer critical section, so the temp file's real
+            // job here is crash safety: readers never see a half-written
+            // target, and any early exit drops the `TempPath` which unlinks
+            // the partial file — no `.tmp` litter left behind.
+            let temp_file = NamedTempFile::new_in(parent_directory_path)?;
+            let mut file = fs::File::create(temp_file.path()).await?;
+            let mut stream = response.bytes_stream();
+            let mut hasher = Sha1::new();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            file.write_all(&chunk).await?;
-            hasher.update(&chunk);
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk?;
+                file.write_all(&chunk).await?;
+                hasher.update(&chunk);
+            }
+            file.flush().await?;
+
+            let computed_digest = Sha1Digest::from_bytes(hasher.finalize().into());
+
+            if let Some(expected_digest) = expected_digest
+                && *expected_digest != computed_digest
+            {
+                bail!("SHA-1 digest mismatch while fetching '{}'", url);
+            }
+
+            Ok(temp_file)
         }
-        file.flush().await?;
+        .await;
+
+        let temp_file = match network_result {
+            Ok(temp_file) => temp_file,
+            Err(err) => {
+                // TTL-tracked URLs get a stale-copy fallback so users on
+                // planes / behind captive portals / during Mojang outages
+                // can still launch. Untracked URLs get no fallback — a
+                // failed content-addressed fetch is a real error.
+                if max_age.is_some() && fs::try_exists(&path).await? {
+                    tracing::warn!("failed to refresh '{url}': {err}; using stale cached copy");
+                    return Ok(path);
+                }
+                return Err(err);
+            }
+        };
 
         tracing::debug!("Fetched '{url}' from the network");
 
-        let computed_digest = Sha1Digest::from_bytes(hasher.finalize().into());
-
-        if let Some(expected_digest) = expected_digest
-            && *expected_digest != computed_digest
-        {
-            bail!("SHA-1 digest mismatch while fetching '{}'", url);
-        }
-
-        temp_path
+        temp_file
+            .into_temp_path()
             .persist(&path)
             .with_context(|| format!("persist cached download for '{url}'"))?;
 
@@ -205,11 +255,36 @@ impl Cache {
     }
 }
 
+/// True when `path` exists and its mtime is older than `max_age`. `None`
+/// always yields `false` (the caller opts out of TTL tracking entirely).
+/// A missing file yields `false` too — the surrounding `try_exists` check
+/// answers "should we refetch?" for that case.
+async fn is_stale(path: &Path, max_age: Option<Duration>) -> anyhow::Result<bool> {
+    let Some(max_age) = max_age else {
+        return Ok(false);
+    };
+    let metadata = match fs::metadata(path).await {
+        Ok(m) => m,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err.into()),
+    };
+    let mtime = metadata.modified()?;
+    // A negative `duration_since` (clock skew, or someone `touch -t`'d
+    // the file into the future) reports the entry as fresh — better than
+    // refetching in a loop when we can't trust the numbers.
+    let age = SystemTime::now()
+        .duration_since(mtime)
+        .unwrap_or(Duration::ZERO);
+    Ok(age > max_age)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
 
     use reqwest::Client;
+    use tempfile::TempDir;
     use url::Url;
 
     use super::Cache;
@@ -249,5 +324,83 @@ mod tests {
     fn path_from_url_rejects_opaque_origin() {
         let url = Url::parse("data:text/plain,hello").unwrap();
         assert!(cache().path_from_url(&url).is_err());
+    }
+
+    /// Seed a cache with `contents` at the path where `url` would be
+    /// stored, and back-date its mtime by `age`. Returns the on-disk path.
+    /// Wraps the boilerplate the TTL tests share.
+    fn seed_cache_entry(cache: &Cache, url: &Url, contents: &[u8], age: Duration) -> PathBuf {
+        let path = cache.path_from_url(url).unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, contents).unwrap();
+        let file = std::fs::File::options().write(true).open(&path).unwrap();
+        file.set_modified(SystemTime::now() - age).unwrap();
+        path
+    }
+
+    /// Unroutable target. Loopback port 1 is virtually never listening,
+    /// so the OS returns ECONNREFUSED immediately — no wall-clock wait.
+    fn unroutable_url(path: &str) -> Url {
+        Url::parse(&format!("http://127.0.0.1:1/{path}")).unwrap()
+    }
+
+    /// A fresh cached entry (mtime within `max_age`) skips the network
+    /// entirely. We prove that by pointing at an unroutable URL: if the
+    /// warm-cache fast path weren't gated by mtime, this would fail
+    /// with ECONNREFUSED.
+    #[tokio::test]
+    async fn fresh_entry_within_ttl_serves_from_cache() {
+        let tmp = TempDir::new().unwrap();
+        let cache = Cache::new(tmp.path().to_owned(), Client::new());
+        let url = unroutable_url("manifest.json");
+        seed_cache_entry(&cache, &url, b"{\"cached\":true}", Duration::from_secs(60));
+
+        let path = cache
+            .fetch(&url, None, Some(Duration::from_secs(6 * 3600)))
+            .await
+            .expect("fresh cache entry should be returned without a network hit");
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"cached\":true}");
+    }
+
+    /// A stale entry (mtime older than `max_age`) forces the download
+    /// path. When that fails and the stale copy is still on disk, we
+    /// serve the stale bytes rather than propagating the network error —
+    /// users on planes / behind captive portals / during Mojang outages
+    /// still get to launch.
+    #[tokio::test]
+    async fn stale_entry_falls_back_on_network_error() {
+        let tmp = TempDir::new().unwrap();
+        let cache = Cache::new(tmp.path().to_owned(), Client::new());
+        let url = unroutable_url("manifest.json");
+        seed_cache_entry(
+            &cache,
+            &url,
+            b"{\"stale\":true}",
+            Duration::from_secs(24 * 3600),
+        );
+
+        let path = cache
+            .fetch(&url, None, Some(Duration::from_secs(6 * 3600)))
+            .await
+            .expect("stale copy should be returned when the network fetch fails");
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"stale\":true}");
+    }
+
+    /// Without TTL opt-in, an unroutable URL surfaces the network error
+    /// even when a cached copy is missing. Guards against a regression
+    /// where the fallback branch swallows errors for non-TTL callers.
+    #[tokio::test]
+    async fn no_ttl_and_no_cache_returns_network_error() {
+        let tmp = TempDir::new().unwrap();
+        let cache = Cache::new(tmp.path().to_owned(), Client::new());
+        let url = unroutable_url("nonexistent.json");
+
+        let err = cache.fetch(&url, None, None).await.unwrap_err();
+        assert!(
+            err.to_string().to_ascii_lowercase().contains("connect")
+                || err.to_string().to_ascii_lowercase().contains("refused")
+                || err.to_string().to_ascii_lowercase().contains("error"),
+            "expected a network error, got: {err}"
+        );
     }
 }

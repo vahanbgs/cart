@@ -25,12 +25,12 @@ impl<'cache> AssetCache<'cache> {
     pub async fn update(&self, asset_index: &AssetIndex) -> anyhow::Result<()> {
         let asset_manifest = self
             .cache
-            .fetch_json::<AssetManifest>(&asset_index.url, Some(&asset_index.sha1))
+            .fetch_json::<AssetManifest>(&asset_index.url, Some(&asset_index.sha1), None)
             .await?;
 
         let asset_manifest_path = self
             .cache
-            .fetch(&asset_index.url, Some(&asset_index.sha1))
+            .fetch(&asset_index.url, Some(&asset_index.sha1), None)
             .await?;
 
         let assets_indexes_path = self.directory().join("indexes");
@@ -77,7 +77,7 @@ impl<'cache> AssetCache<'cache> {
                 // ones don't — but we still need to pull the object into the
                 // cache so the game can resolve it via the assets/objects
                 // symlink below.
-                self.cache.fetch(&url, Some(&object.hash)).await?;
+                self.cache.fetch(&url, Some(&object.hash), None).await?;
             }
             bar.pb_inc(1);
             Ok(())

@@ -28,7 +28,7 @@ use crate::api::{
     forge::ForgePromotions,
     piston::{Arguments, Version, VersionManifest},
 };
-use cache::{AssetCache, Cache};
+use cache::{AssetCache, Cache, MANIFEST_MAX_AGE};
 
 pub struct Launcher {
     cache: Cache,
@@ -68,7 +68,7 @@ impl Launcher {
     pub async fn build_command(&self, instance: &Instance) -> anyhow::Result<(Command, TempDir)> {
         let version_manifest = self
             .cache
-            .fetch_json::<VersionManifest>(VersionManifest::url(), None)
+            .fetch_json::<VersionManifest>(VersionManifest::url(), None, Some(MANIFEST_MAX_AGE))
             .await?;
 
         let version_map = version_manifest.version_map();
@@ -82,7 +82,7 @@ impl Launcher {
         let version_info = version_map.get(version_id).expect("unknown version");
         let version = self
             .cache
-            .fetch_json::<Version>(&version_info.url, Some(&version_info.sha1))
+            .fetch_json::<Version>(&version_info.url, Some(&version_info.sha1), None)
             .await?;
 
         let asset_index = &version.asset_index;
@@ -100,6 +100,7 @@ impl Launcher {
             .fetch(
                 &version.downloads.client.url,
                 Some(&version.downloads.client.sha1),
+                None,
             )
             .await?;
 
@@ -201,7 +202,11 @@ impl Launcher {
                         if matches!(&loader.spec, LoaderSpec::Latest | LoaderSpec::Recommended) {
                             let promotions = self
                                 .cache
-                                .fetch_json::<ForgePromotions>(ForgePromotions::url(), None)
+                                .fetch_json::<ForgePromotions>(
+                                    ForgePromotions::url(),
+                                    None,
+                                    Some(MANIFEST_MAX_AGE),
+                                )
                                 .await?;
                             promotions.resolve(version_id, forge_channel).ok_or_else(|| {
                             anyhow!("no Forge {forge_channel} release for Minecraft {version_id}")
@@ -454,7 +459,7 @@ impl Launcher {
     /// / CurseForge / user configs and don't carry a known digest to
     /// verify against.
     pub async fn fetch_mod(&self, url: &Url) -> anyhow::Result<PathBuf> {
-        self.cache.fetch(url, None).await
+        self.cache.fetch(url, None, None).await
     }
 
     /// Whether a mod jar for `url` is already resident in the cache.

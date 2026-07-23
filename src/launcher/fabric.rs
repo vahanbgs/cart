@@ -36,7 +36,11 @@ pub async fn install(
     tracing::info!("resolved Fabric loader for mc={mc_version} to {effective_version}");
 
     let profile: Profile = cache
-        .fetch_json(&fabric::profile_url(mc_version, &effective_version), None)
+        .fetch_json(
+            &fabric::profile_url(mc_version, &effective_version),
+            None,
+            None,
+        )
         .await
         .with_context(|| {
             format!("failed to fetch Fabric profile for mc={mc_version} loader={effective_version}")

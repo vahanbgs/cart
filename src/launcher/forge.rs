@@ -148,7 +148,7 @@ pub async fn install(
         let mut last_err = None;
         let mut winner = None;
         for (candidate_version, url) in candidates {
-            match cache.fetch(&url, None).await {
+            match cache.fetch(&url, None, None).await {
                 Ok(path) => {
                     winner = Some((candidate_version, path));
                     break;
@@ -338,7 +338,7 @@ async fn download_and_resolve(
             // under `maven/{artifact.path}` (which we've already extracted to
             // the Forge Maven cache path earlier in `install`).
             let path = if let Some(url) = &artifact.url {
-                cache.fetch(url, Some(&artifact.sha1)).await?
+                cache.fetch(url, Some(&artifact.sha1), None).await?
             } else {
                 let jar_url = flavor
                     .maven_base_url()

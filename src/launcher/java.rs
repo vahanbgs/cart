@@ -26,7 +26,7 @@ use crate::api::{
 static MOJANG_LIBRARIES_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://libraries.minecraft.net/").unwrap());
 
-use super::cache::Cache;
+use super::cache::{Cache, MANIFEST_MAX_AGE};
 use crate::parallel;
 use crate::progress::{self, IndicatifSpanExt};
 
@@ -41,7 +41,11 @@ async fn fetch_java_distribution_manifest(
 ) -> anyhow::Result<JavaDistributionManifest> {
     use crate::api::Endpoint;
     cache
-        .fetch_json(JavaDistributionManifest::url(), None)
+        .fetch_json(
+            JavaDistributionManifest::url(),
+            None,
+            Some(MANIFEST_MAX_AGE),
+        )
         .await
 }
 
@@ -58,6 +62,7 @@ pub async fn fetch_java_distribution(
         .fetch_json::<JavaDistribution>(
             &java_distribution_info.manifest.url,
             Some(&java_distribution_info.manifest.sha1),
+            None,
         )
         .await?;
 
@@ -181,7 +186,7 @@ pub async fn build_class_path(
             let cp = if let Some(artifact) = &library_entry.downloads.artifact
                 && let Some(url) = &artifact.url
             {
-                let path = cache.fetch(url, Some(&artifact.sha1)).await?;
+                let path = cache.fetch(url, Some(&artifact.sha1), None).await?;
                 Some((
                     dedup_key(&library_entry.name),
                     path.to_string_lossy().into_owned(),
@@ -194,7 +199,7 @@ pub async fn build_class_path(
                 && let Some(native) = native.get(&NativeClassifier::current())
                 && let Some(url) = &native.url
             {
-                Some(cache.fetch(url, Some(&native.sha1)).await?)
+                Some(cache.fetch(url, Some(&native.sha1), None).await?)
             } else {
                 None
             };
@@ -233,7 +238,7 @@ pub async fn build_class_path(
             {
                 // Modern format: explicit download URL.
                 let sha1 = lib.downloads.artifact.as_ref().map(|a| &a.sha1);
-                cache.fetch(url, sha1).await?
+                cache.fetch(url, sha1, None).await?
             } else if let Some(artifact) = &lib.downloads.artifact {
                 // downloads.artifact present but URL is empty: the JAR is bundled
                 // in the Forge-family installer. forge::install() already extracted
@@ -251,7 +256,7 @@ pub async fn build_class_path(
                     .with_context(|| {
                         format!("failed to build Forge Maven URL for: {}", lib.name)
                     })?;
-                cache.fetch(&url, Some(&artifact.sha1)).await?
+                cache.fetch(&url, Some(&artifact.sha1), None).await?
             } else {
                 // Legacy format (no downloads field): build URL from lib.url base
                 // or the default Mojang libraries host.
@@ -261,7 +266,7 @@ pub async fn build_class_path(
                 let url = base
                     .join(&coord.to_path().to_string_lossy())
                     .with_context(|| format!("failed to build URL for library: {}", lib.name))?;
-                cache.fetch(&url, None).await?
+                cache.fetch(&url, None, None).await?
             };
 
             bar.pb_inc(1);
