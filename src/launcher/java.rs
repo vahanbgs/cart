@@ -33,6 +33,13 @@ static MOJANG_LIBRARIES_URL: LazyLock<Url> =
 /// don't need to reason about two independent per-host caps.
 const JAVA_FETCH_CONCURRENCY: usize = 8;
 
+/// Max in-flight classpath library fetches. Covers both the vanilla
+/// library list (10–40 jars from `libraries.minecraft.net`) and the
+/// loader "extras" (Fabric / Forge / NeoForge, another 10–20). We use
+/// order-preserving `buffered(N)` here — classpath entry position and
+/// same-key replacement semantics both depend on original list order.
+const CLASSPATH_FETCH_CONCURRENCY: usize = 8;
+
 use super::cache::Cache;
 
 async fn make_executable(path: impl AsRef<Path>) -> anyhow::Result<()> {
@@ -130,101 +137,135 @@ pub async fn build_class_path(
         client_jar.to_string_lossy().into_owned(),
     );
 
-    for library_entry in &version_manifest.libraries {
-        let mut allow = library_entry.rules.is_none();
+    // Fetch phase: parallel, order-preserving. Each future returns
+    // `(classpath_entry, native_jar_path)` slots (either may be None
+    // depending on the library entry shape and rules).
+    type FetchedVanilla = (Option<(String, String)>, Option<PathBuf>);
+    let vanilla_fetched: Vec<FetchedVanilla> =
+        futures::stream::iter(&version_manifest.libraries)
+            .map(|library_entry| async move {
+                let mut allow = library_entry.rules.is_none();
 
-        if let Some(rules) = &library_entry.rules {
-            allow = rules.is_empty();
+                if let Some(rules) = &library_entry.rules {
+                    allow = rules.is_empty();
 
-            for rule in rules {
-                let mut rule_applies = true;
+                    for rule in rules {
+                        let mut rule_applies = true;
 
-                if let Some(os) = &rule.os {
-                    rule_applies &= match os {
-                        Os::Arch { arch: _ } => true,
-                        Os::Name { name } => name.matches_current_platform(),
+                        if let Some(os) = &rule.os {
+                            rule_applies &= match os {
+                                Os::Arch { arch: _ } => true,
+                                Os::Name { name } => name.matches_current_platform(),
+                            }
+                        }
+
+                        rule_applies &= rule.features.is_none();
+
+                        if rule_applies {
+                            allow = rule.action == Action::Allow;
+                        }
                     }
                 }
 
-                rule_applies &= rule.features.is_none();
-
-                if rule_applies {
-                    allow = rule.action == Action::Allow;
+                if !allow {
+                    return Ok::<_, anyhow::Error>((None, None));
                 }
-            }
-        }
 
-        if !allow {
-            continue;
-        }
+                let cp = if let Some(artifact) = &library_entry.downloads.artifact
+                    && let Some(url) = &artifact.url
+                {
+                    let path = cache.fetch(url, Some(&artifact.sha1)).await?;
+                    Some((
+                        dedup_key(&library_entry.name),
+                        path.to_string_lossy().into_owned(),
+                    ))
+                } else {
+                    None
+                };
 
-        if let Some(artifact) = &library_entry.downloads.artifact
-            && let Some(url) = &artifact.url
-        {
-            let path = cache.fetch(url, Some(&artifact.sha1)).await?;
-            add_classpath_entry(
-                &mut entries,
-                &mut key_positions,
-                dedup_key(&library_entry.name),
-                path.to_string_lossy().into_owned(),
-            );
-        }
+                let native_jar = if let Some(native) = &library_entry.downloads.classifiers
+                    && let Some(native) = native.get(&NativeClassifier::current())
+                    && let Some(url) = &native.url
+                {
+                    Some(cache.fetch(url, Some(&native.sha1)).await?)
+                } else {
+                    None
+                };
 
-        if let Some(native) = &library_entry.downloads.classifiers
-            && let Some(native) = native.get(&NativeClassifier::current())
-            && let Some(url) = &native.url
-        {
-            let jar_path = cache.fetch(url, Some(&native.sha1)).await?;
+                Ok((cp, native_jar))
+            })
+            .buffered(CLASSPATH_FETCH_CONCURRENCY)
+            .try_collect()
+            .await?;
+
+    // Apply phase: sequential, in original order. `add_classpath_entry`
+    // relies on insertion order for classpath position + same-key
+    // replacement; zip extraction into `natives_directory` is a shared
+    // synchronous writer we keep single-threaded on purpose.
+    for (cp, native_jar) in vanilla_fetched {
+        if let Some((key, path)) = cp {
+            add_classpath_entry(&mut entries, &mut key_positions, key, path);
+        }
+        if let Some(jar_path) = native_jar {
             let jar_file = File::open(jar_path).await?;
             let mut archive = ZipArchive::new(jar_file.into_std().await)?;
-
             archive.extract(natives_directory)?;
         }
     }
 
-    for lib in extra_libraries {
-        if lib.clientreq == Some(false) {
-            continue;
-        }
+    // Same shape as vanilla: parallel fetch, sequential apply. Order
+    // preservation matters for the same dedup reasons.
+    let extras_fetched: Vec<Option<(String, String)>> = futures::stream::iter(extra_libraries)
+        .map(|lib| async move {
+            if lib.clientreq == Some(false) {
+                return Ok::<_, anyhow::Error>(None);
+            }
 
-        let path = if let Some(url) = lib.downloads.artifact.as_ref().and_then(|a| a.url.as_ref()) {
-            // Modern format: explicit download URL.
-            let sha1 = lib.downloads.artifact.as_ref().map(|a| &a.sha1);
-            cache.fetch(url, sha1).await?
-        } else if let Some(artifact) = &lib.downloads.artifact {
-            // downloads.artifact present but URL is empty: the JAR is bundled
-            // in the Forge-family installer. forge::install() already extracted
-            // it to a cache path derived from the flavor's maven base.
-            let base = forge_family_maven_base.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "extra library {} has empty download URL but no forge-family \
-                     maven base was passed to build_class_path — the caller must \
-                     supply one when passing extras from a forge-family install",
-                    lib.name
-                )
-            })?;
-            let url = base
-                .join(&artifact.path.to_string_lossy())
-                .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
-            cache.fetch(&url, Some(&artifact.sha1)).await?
-        } else {
-            // Legacy format (no downloads field): build URL from lib.url base
-            // or the default Mojang libraries host.
-            let coord = MavenCoordinate::parse(&lib.name)
-                .with_context(|| format!("failed to parse Maven coordinate: {}", lib.name))?;
-            let base = lib.url.as_ref().unwrap_or(&MOJANG_LIBRARIES_URL);
-            let url = base
-                .join(&coord.to_path().to_string_lossy())
-                .with_context(|| format!("failed to build URL for library: {}", lib.name))?;
-            cache.fetch(&url, None).await?
-        };
+            let path = if let Some(url) =
+                lib.downloads.artifact.as_ref().and_then(|a| a.url.as_ref())
+            {
+                // Modern format: explicit download URL.
+                let sha1 = lib.downloads.artifact.as_ref().map(|a| &a.sha1);
+                cache.fetch(url, sha1).await?
+            } else if let Some(artifact) = &lib.downloads.artifact {
+                // downloads.artifact present but URL is empty: the JAR is bundled
+                // in the Forge-family installer. forge::install() already extracted
+                // it to a cache path derived from the flavor's maven base.
+                let base = forge_family_maven_base.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "extra library {} has empty download URL but no forge-family \
+                         maven base was passed to build_class_path — the caller must \
+                         supply one when passing extras from a forge-family install",
+                        lib.name
+                    )
+                })?;
+                let url = base
+                    .join(&artifact.path.to_string_lossy())
+                    .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
+                cache.fetch(&url, Some(&artifact.sha1)).await?
+            } else {
+                // Legacy format (no downloads field): build URL from lib.url base
+                // or the default Mojang libraries host.
+                let coord = MavenCoordinate::parse(&lib.name)
+                    .with_context(|| format!("failed to parse Maven coordinate: {}", lib.name))?;
+                let base = lib.url.as_ref().unwrap_or(&MOJANG_LIBRARIES_URL);
+                let url = base
+                    .join(&coord.to_path().to_string_lossy())
+                    .with_context(|| format!("failed to build URL for library: {}", lib.name))?;
+                cache.fetch(&url, None).await?
+            };
 
-        add_classpath_entry(
-            &mut entries,
-            &mut key_positions,
-            dedup_key(&lib.name),
-            path.to_string_lossy().into_owned(),
-        );
+            Ok(Some((
+                dedup_key(&lib.name),
+                path.to_string_lossy().into_owned(),
+            )))
+        })
+        .buffered(CLASSPATH_FETCH_CONCURRENCY)
+        .try_collect()
+        .await?;
+
+    for (key, path) in extras_fetched.into_iter().flatten() {
+        add_classpath_entry(&mut entries, &mut key_positions, key, path);
     }
 
     let paths: Vec<String> = entries.into_iter().map(|(_, path)| path).collect();
