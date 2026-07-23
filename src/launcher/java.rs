@@ -133,6 +133,17 @@ pub async fn build_class_path(
         client_jar.to_string_lossy().into_owned(),
     );
 
+    // One bar covering both vanilla and forge-family/fabric extras —
+    // OS-filtered vanilla entries and `clientreq=false` extras still
+    // tick so the bar reflects total entries considered, not just
+    // downloads issued.
+    let bar = progress::bar(
+        "libraries",
+        (version_manifest.libraries.len() + extra_libraries.len()) as u64,
+    );
+    bar.pb_start();
+    let bar = &bar;
+
     // Fetch phase: parallel, order-preserving. Each future returns
     // `(classpath_entry, native_jar_path)` slots (either may be None
     // depending on the library entry shape and rules).
@@ -163,6 +174,7 @@ pub async fn build_class_path(
             }
 
             if !allow {
+                bar.pb_inc(1);
                 return Ok((None, None));
             }
 
@@ -187,6 +199,7 @@ pub async fn build_class_path(
                 None
             };
 
+            bar.pb_inc(1);
             Ok((cp, native_jar))
         })
         .await?;
@@ -211,6 +224,7 @@ pub async fn build_class_path(
     let extras_fetched: Vec<Option<(String, String)>> =
         parallel::collect(extra_libraries, |lib| async move {
             if lib.clientreq == Some(false) {
+                bar.pb_inc(1);
                 return Ok(None);
             }
 
@@ -248,6 +262,7 @@ pub async fn build_class_path(
                 cache.fetch(&url, None).await?
             };
 
+            bar.pb_inc(1);
             Ok(Some((
                 dedup_key(&lib.name),
                 path.to_string_lossy().into_owned(),
