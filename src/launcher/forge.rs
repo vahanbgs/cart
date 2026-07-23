@@ -21,6 +21,7 @@ use crate::api::{
 const PATCHED_DATA_KEY: &str = "PATCHED";
 
 use super::cache::Cache;
+use crate::parallel;
 
 pub static FORGE_MAVEN_URL: LazyLock<Url> =
     LazyLock::new(|| Url::parse("https://maven.minecraftforge.net/").unwrap());
@@ -321,28 +322,33 @@ async fn download_and_resolve(
     installer_path: &Path,
     cache: &Cache,
 ) -> anyhow::Result<(HashMap<String, PathBuf>, HashMap<String, PathBuf>)> {
-    let mut lib_paths: HashMap<String, PathBuf> = HashMap::new();
+    let lib_paths: HashMap<String, PathBuf> =
+        parallel::collect(&profile.libraries, |lib| async move {
+            let Some(artifact) = &lib.downloads.artifact else {
+                return Ok(None);
+            };
 
-    for lib in &profile.libraries {
-        let Some(artifact) = &lib.downloads.artifact else {
-            continue;
-        };
+            // Downloaded from an explicit URL, or bundled inside the installer
+            // under `maven/{artifact.path}` (which we've already extracted to
+            // the Forge Maven cache path earlier in `install`).
+            let path = if let Some(url) = &artifact.url {
+                cache.fetch(url, Some(&artifact.sha1)).await?
+            } else {
+                let jar_url = flavor
+                    .maven_base_url()
+                    .join(&artifact.path.to_string_lossy())
+                    .with_context(|| {
+                        format!("failed to build Forge Maven URL for: {}", lib.name)
+                    })?;
+                cache.path_from_url(&jar_url)?
+            };
 
-        // Downloaded from an explicit URL, or bundled inside the installer
-        // under `maven/{artifact.path}` (which we've already extracted to the
-        // Forge Maven cache path earlier in `install`).
-        let path = if let Some(url) = &artifact.url {
-            cache.fetch(url, Some(&artifact.sha1)).await?
-        } else {
-            let jar_url = flavor
-                .maven_base_url()
-                .join(&artifact.path.to_string_lossy())
-                .with_context(|| format!("failed to build Forge Maven URL for: {}", lib.name))?;
-            cache.path_from_url(&jar_url)?
-        };
-
-        lib_paths.insert(lib.name.clone(), path);
-    }
+            Ok(Some((lib.name.clone(), path)))
+        })
+        .await?
+        .into_iter()
+        .flatten()
+        .collect();
 
     let local_dir = local_maven_dir(flavor, cache);
     let mut resolved: HashMap<String, PathBuf> = HashMap::new();
