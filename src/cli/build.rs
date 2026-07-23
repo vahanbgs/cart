@@ -22,10 +22,10 @@ const CURSEFORGE_API_KEY_ENV: &str = "CURSEFORGE_API_KEY";
 
 use super::{Build, Cli};
 
-/// Name of the source directory (next to `cart.toml`) whose contents mirror
+/// Name of the overrides directory (next to `cart.toml`) whose contents mirror
 /// the `.minecraft/` layout and are replicated into the game directory on
 /// every build.
-const SOURCE_DIR: &str = "src";
+pub(super) const OVERRIDES_DIR: &str = "overrides";
 
 impl Build {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
@@ -37,21 +37,21 @@ impl Build {
     pub async fn run_with(&self, config: &Config<'_>, launcher: &Launcher) -> anyhow::Result<()> {
         let game_directory = config.manifest_directory().join("minecraft/");
         let mods_directory = game_directory.join("mods/");
-        let source_directory = config.manifest_directory().join(SOURCE_DIR);
+        let overrides_directory = config.manifest_directory().join(OVERRIDES_DIR);
         fs::create_dir_all(&mods_directory).await?;
 
         // Manifest is the sole owner of `mods/`. Forbid top-level jars under
-        // `src/mods/` — silent skipping would let authors think a dev jar is
-        // being placed when it isn't.
-        reject_src_mods_jars(&source_directory.join("mods")).await?;
+        // `overrides/mods/` — silent skipping would let authors think a dev
+        // jar is being placed when it isn't.
+        reject_overrides_mods_jars(&overrides_directory.join("mods")).await?;
 
         sync_mods(config, launcher, &mods_directory).await?;
 
-        // Replicate `src/` on top of `minecraft/` — always overwrites, so
-        // in-place writes by mods (e.g. FML rewriting `fml.toml`) never leak
-        // back into the source tree and pack authors' edits always win on
-        // the next build.
-        copy_source_dir(&source_directory, &game_directory).await?;
+        // Replicate `overrides/` on top of `minecraft/` — always overwrites,
+        // so in-place writes by mods (e.g. FML rewriting `fml.toml`) never
+        // leak back into the overrides tree and pack authors' edits always
+        // win on the next build.
+        copy_overrides_dir(&overrides_directory, &game_directory).await?;
 
         Ok(())
     }
@@ -208,15 +208,15 @@ async fn prune_stale_jars(mods_directory: &Path, expected: &HashSet<String>) -> 
     Ok(())
 }
 
-/// Fail loudly if `src/mods/` contains a top-level jar (enabled or disabled).
-/// Subdirectories are fine — those may be version-specific mod folders that
-/// belong to individual mods and are none of cart's business.
-pub(super) async fn reject_src_mods_jars(src_mods: &Path) -> anyhow::Result<()> {
-    if !fs::try_exists(src_mods).await? {
+/// Fail loudly if `overrides/mods/` contains a top-level jar (enabled or
+/// disabled). Subdirectories are fine — those may be version-specific mod
+/// folders that belong to individual mods and are none of cart's business.
+pub(super) async fn reject_overrides_mods_jars(overrides_mods: &Path) -> anyhow::Result<()> {
+    if !fs::try_exists(overrides_mods).await? {
         return Ok(());
     }
 
-    let mut entries = fs::read_dir(src_mods).await?;
+    let mut entries = fs::read_dir(overrides_mods).await?;
     while let Some(entry) = entries.next_entry().await? {
         if !entry.file_type().await?.is_file() {
             continue;
@@ -227,8 +227,8 @@ pub(super) async fn reject_src_mods_jars(src_mods: &Path) -> anyhow::Result<()> 
         };
         if name_str.ends_with(".jar") || name_str.ends_with(".jar.disabled") {
             bail!(
-                "src/mods/{name_str} is not allowed — declare it in [mods] in cart.toml instead \
-                 (with `disabled = true` if you want it as `.jar.disabled`)"
+                "overrides/mods/{name_str} is not allowed — declare it in [mods] in cart.toml \
+                 instead (with `disabled = true` if you want it as `.jar.disabled`)"
             );
         }
     }
@@ -236,7 +236,7 @@ pub(super) async fn reject_src_mods_jars(src_mods: &Path) -> anyhow::Result<()> 
     Ok(())
 }
 
-async fn copy_source_dir(source: &Path, target: &Path) -> anyhow::Result<()> {
+async fn copy_overrides_dir(source: &Path, target: &Path) -> anyhow::Result<()> {
     if !fs::try_exists(source).await? {
         return Ok(());
     }
@@ -345,12 +345,12 @@ mod tests {
         assert!(dir.path().join("1.12.2/legacy.jar").exists());
     }
 
-    // ---------- reject_src_mods_jars ----------
+    // ---------- reject_overrides_mods_jars ----------
 
     #[tokio::test]
     async fn reject_ok_when_dir_missing() {
         let dir = tempfile::tempdir().unwrap();
-        reject_src_mods_jars(&dir.path().join("mods"))
+        reject_overrides_mods_jars(&dir.path().join("mods"))
             .await
             .unwrap();
     }
@@ -362,12 +362,12 @@ mod tests {
         touch(&mods.join("README.md")).await;
         touch(&mods.join("subdir/nested.jar")).await;
 
-        reject_src_mods_jars(&mods).await.unwrap();
+        reject_overrides_mods_jars(&mods).await.unwrap();
     }
 
     /// The whole point of this guard is that pack authors think they're
-    /// dropping a dev jar into `src/mods/foo.jar` and getting it into
-    /// the game — silently skipping would leave them wondering why.
+    /// dropping a dev jar into `overrides/mods/foo.jar` and getting it
+    /// into the game — silently skipping would leave them wondering why.
     /// The error text tells them exactly what to do; if it drifts,
     /// this test forces the discussion.
     #[tokio::test]
@@ -376,7 +376,7 @@ mod tests {
         let mods = dir.path().join("mods");
         touch(&mods.join("naughty.jar")).await;
 
-        let err = reject_src_mods_jars(&mods).await.unwrap_err();
+        let err = reject_overrides_mods_jars(&mods).await.unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("not allowed"), "unexpected: {msg}");
         assert!(msg.contains("declare it in [mods]"), "unexpected: {msg}");
@@ -388,11 +388,11 @@ mod tests {
         let mods = dir.path().join("mods");
         touch(&mods.join("naughty.jar.disabled")).await;
 
-        let err = reject_src_mods_jars(&mods).await.unwrap_err();
+        let err = reject_overrides_mods_jars(&mods).await.unwrap_err();
         assert!(err.to_string().contains("not allowed"), "{err}");
     }
 
-    // ---------- copy_source_dir ----------
+    // ---------- copy_overrides_dir ----------
 
     #[tokio::test]
     async fn copy_is_a_no_op_when_source_missing() {
@@ -400,7 +400,7 @@ mod tests {
         let target = dir.path().join("out");
         fs::create_dir_all(&target).await.unwrap();
 
-        copy_source_dir(&dir.path().join("src"), &target)
+        copy_overrides_dir(&dir.path().join("overrides"), &target)
             .await
             .unwrap();
 
@@ -411,12 +411,12 @@ mod tests {
     #[tokio::test]
     async fn copy_replicates_nested_files_creating_dirs() {
         let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("src");
+        let source = dir.path().join("overrides");
         let target = dir.path().join("out");
         touch(&source.join("options.txt")).await;
         touch(&source.join("config/nested/foo.cfg")).await;
 
-        copy_source_dir(&source, &target).await.unwrap();
+        copy_overrides_dir(&source, &target).await.unwrap();
 
         assert!(target.join("options.txt").exists());
         assert!(target.join("config/nested/foo.cfg").exists());
@@ -424,13 +424,13 @@ mod tests {
 
     /// `fs::copy` overwriting at the destination is the invariant that
     /// lets pack authors' edits win on every rebuild — otherwise FML
-    /// rewriting `fml.toml` in-place would leak back into `src/` on the
-    /// next mirror. The doc comment on `copy_source_dir` calls this
-    /// out; this test locks it.
+    /// rewriting `fml.toml` in-place would leak back into `overrides/`
+    /// on the next mirror. The doc comment on `copy_overrides_dir` calls
+    /// this out; this test locks it.
     #[tokio::test]
     async fn copy_overwrites_existing_destination_file() {
         let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("src");
+        let source = dir.path().join("overrides");
         let target = dir.path().join("out");
         fs::create_dir_all(&source).await.unwrap();
         fs::create_dir_all(&target).await.unwrap();
@@ -441,7 +441,7 @@ mod tests {
             .await
             .unwrap();
 
-        copy_source_dir(&source, &target).await.unwrap();
+        copy_overrides_dir(&source, &target).await.unwrap();
 
         let contents = fs::read_to_string(target.join("options.txt"))
             .await

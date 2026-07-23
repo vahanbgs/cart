@@ -71,11 +71,11 @@ custom = { url = "https://example.com/CustomMod.jar" }
 wip = { modrinth = "some-mod", disabled = true }
 ```
 
-The manifest directory also owns a `src/` tree that mirrors the
-`.minecraft/` layout. Every `cart build` replicates `src/` on top of
+The manifest directory also owns an `overrides/` tree that mirrors the
+`.minecraft/` layout. Every `cart build` replicates `overrides/` on top of
 `minecraft/`, so pack-authored configs, resource packs, or scripts live
-in version control alongside the manifest. Top-level jars in `src/mods/`
-are rejected — mods belong in `[mods]`.
+in version control alongside the manifest. Top-level jars in
+`overrides/mods/` are rejected — mods belong in `[mods]`.
 
 ## Commands
 
@@ -90,7 +90,7 @@ are rejected — mods belong in `[mods]`.
 | `cart enable <name>` / `cart disable <name>` | Flip the `disabled` flag on an entry. |
 | `cart update [names...]` | Re-resolve Modrinth and CurseForge entries against the current Minecraft version and rewrite the pinned version/file. URL entries are skipped. |
 | `cart list` | Print `[mods]` as a table. |
-| `cart build` | Download mods into `minecraft/mods/` and copy `src/` over `minecraft/`. |
+| `cart build` | Download mods into `minecraft/mods/` and copy `overrides/` over `minecraft/`. |
 | `cart run` | `build`, then launch Minecraft with the bundled Java runtime. |
 | `cart export <format>` | Package the pack as `mrpack`, `curseforge`, or `prism` for redistribution. |
 
@@ -106,7 +106,7 @@ Global flags:
 ```
 mypack/
 ├── cart.toml                  # manifest
-├── src/                       # mirrored into minecraft/ on every build
+├── overrides/                 # mirrored into minecraft/ on every build
 │   └── config/…
 └── minecraft/                 # game directory (created by cart)
     ├── mods/                  # cart-managed; jars are hardlinks into the cache

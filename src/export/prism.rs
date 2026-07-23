@@ -11,7 +11,7 @@
 //!   whose versions the user chose.
 //! - `.minecraft/mods/*.jar`: every mod jar, embedded (Prism instances
 //!   are self-contained; no URL indirection).
-//! - `.minecraft/…`: cart's `src/` tree mirrored here for configs,
+//! - `.minecraft/…`: cart's `overrides/` tree mirrored here for configs,
 //!   resourcepacks, kubejs scripts, etc.
 //!
 //! The routing model differs from mrpack/curseforge: there's no
@@ -101,7 +101,7 @@ pub fn instance_cfg(name: &str, notes: Option<&str>) -> String {
 ///
 /// Every entry lives under `<instance_name>/`. `overrides` entries
 /// arrive already fully-qualified (e.g. `"<name>/.minecraft/config/x.toml"`)
-/// so the caller controls the exact in-archive layout of the src/
+/// so the caller controls the exact in-archive layout of the overrides
 /// mirror.
 pub fn write_pack(
     instance_name: &str,
