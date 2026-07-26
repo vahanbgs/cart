@@ -11,6 +11,7 @@ mod list;
 mod modrinth;
 mod remove;
 mod run;
+mod scaffold;
 mod update;
 
 pub use args::*;
