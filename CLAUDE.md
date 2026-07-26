@@ -19,7 +19,8 @@ cargo fmt                # format
 cargo test               # run tests
 
 # Run the CLI
-cargo run -- init <path>              # create a new cart project at <path>
+cargo run -- new <path>               # scaffold a new cart project in a fresh directory (errors if <path> exists)
+cargo run -- init [path]              # scaffold in an existing directory; defaults to `.`; errors if cart.toml is already there
 cargo run -- modrinth add <slug>      # add a Modrinth mod (--version to pin, --disabled); alias: `mr add`
 cargo run -- modrinth search <query>  # list top Modrinth mod matches (--limit N); alias: `mr search`
 cargo run -- modrinth find <query>    # interactive: search, pick from menu, add to manifest; alias: `mr find`
