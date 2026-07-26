@@ -60,6 +60,7 @@ pub enum Subcommands {
 
 #[derive(Args)]
 pub struct Init {
+    #[arg(default_value = ".")]
     pub path: PathBuf,
 }
 

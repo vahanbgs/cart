@@ -14,3 +14,30 @@ impl New {
         super::scaffold::scaffold(cli, &self.path).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::{Cli, Subcommands};
+
+    #[tokio::test]
+    async fn new_errors_when_path_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = Cli {
+            directory: None,
+            verbose: 0,
+            minecraft_version: None,
+            command: Subcommands::New(New {
+                path: dir.path().to_path_buf(),
+            }),
+        };
+        let Subcommands::New(new) = &cli.command else {
+            unreachable!()
+        };
+        let err = new.run(&cli).await.unwrap_err();
+        assert!(
+            err.to_string().contains("already exists"),
+            "unexpected error: {err}"
+        );
+    }
+}

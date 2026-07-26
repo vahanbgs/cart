@@ -25,13 +25,14 @@ The binary lands at `target/release/cart`.
 ## Quick start
 
 ```sh
-cart init mypack               # interactive: pick MC version + loader
+cart new mypack                # interactive: pick MC version + loader
 cd mypack
 cart mr find jei               # interactive: search Modrinth, pick, add
 cart run                       # download mods, then launch Minecraft
 ```
 
-`cart init` prompts for the Minecraft version and mod loader; pass `--mv
+`cart new` (fresh directory) and `cart init` (existing directory)
+both prompt for the Minecraft version and mod loader; pass `--mv
 <version>` beforehand to skip the version prompt. `cart mr` (Modrinth)
 and `cart cf` (CurseForge) each expose `add`, `search`, and `find` — `add`
 takes a slug when you already know the exact mod, `search` prints hits to
@@ -81,7 +82,8 @@ in version control alongside the manifest. Top-level jars in
 
 | Command | What it does |
 | --- | --- |
-| `cart init <path>` | Interactive project setup — prompts for Minecraft version and mod loader, writes `cart.toml`. |
+| `cart new <path>` | Interactive project setup in a fresh directory. Errors if `<path>` exists. |
+| `cart init [path]` | Same, but initializes an existing directory (default: `.`). Errors if `cart.toml` is already there. |
 | `cart mr add <slug>` | Add a Modrinth mod. `--version` pins; `--name` overrides the manifest key; `--disabled` adds it disabled. |
 | `cart mr search <query>` | List top Modrinth matches for `<query>`. |
 | `cart mr find <query>` | Interactive: search Modrinth, pick from the menu, add to the manifest. |
