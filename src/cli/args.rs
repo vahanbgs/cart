@@ -37,6 +37,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Subcommands {
+    /// Create a new pack in a new directory (interactive setup).
+    New(New),
+    /// Initialize an existing directory as a pack (interactive setup).
     Init(Init),
     Build(Build),
     Run(Run),
@@ -57,6 +60,11 @@ pub enum Subcommands {
 
 #[derive(Args)]
 pub struct Init {
+    pub path: PathBuf,
+}
+
+#[derive(Args)]
+pub struct New {
     pub path: PathBuf,
 }
 

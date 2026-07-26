@@ -9,6 +9,7 @@ mod hit_view;
 mod init;
 mod list;
 mod modrinth;
+mod new;
 mod remove;
 mod run;
 mod scaffold;

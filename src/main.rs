@@ -47,6 +47,9 @@ async fn main() -> anyhow::Result<()> {
         Subcommands::Init(init) => {
             init.run(&cli).await?;
         }
+        Subcommands::New(new) => {
+            new.run(&cli).await?;
+        }
         Subcommands::Run(run) => {
             run.run(&cli).await?;
         }
