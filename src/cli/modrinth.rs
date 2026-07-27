@@ -25,12 +25,12 @@ impl Add {
         let path = config.manifest_directory().join("cart.toml");
 
         let minecraft_version = &config.manifest().minecraft;
-        let loader = match config.manifest().loader.as_ref().map(|l| l.kind) {
-            Some(cart::LoaderKind::Fabric) => "fabric",
-            Some(cart::LoaderKind::Forge) => "forge",
-            Some(cart::LoaderKind::NeoForge) => "neoforge",
-            None => "vanilla",
-        };
+        let loader = config
+            .manifest()
+            .loader
+            .as_ref()
+            .map(|l| l.kind.as_modrinth())
+            .unwrap_or("vanilla");
 
         let http = Client::new();
         let resolved = modrinth::resolve(

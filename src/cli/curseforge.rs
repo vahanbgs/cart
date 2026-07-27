@@ -42,11 +42,11 @@ impl Add {
         let path = config.manifest_directory().join("cart.toml");
 
         let minecraft_version = &config.manifest().minecraft;
-        let loader = config.manifest().loader.as_ref().map(|l| match l.kind {
-            cart::LoaderKind::Fabric => curseforge::LoaderType::Fabric,
-            cart::LoaderKind::Forge => curseforge::LoaderType::Forge,
-            cart::LoaderKind::NeoForge => curseforge::LoaderType::NeoForge,
-        });
+        let loader = config
+            .manifest()
+            .loader
+            .as_ref()
+            .map(|l| l.kind.into());
 
         let http = cf_client()?;
 

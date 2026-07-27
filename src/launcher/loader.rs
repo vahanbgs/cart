@@ -20,6 +20,20 @@ pub enum LoaderKind {
     NeoForge,
 }
 
+impl LoaderKind {
+    /// Loader identifier as Modrinth expects in `/v2/search` facets and
+    /// `/v2/project/{slug}/version?loaders=[…]` queries. The vanilla
+    /// case (no loader in the manifest) is Modrinth's `"vanilla"` and is
+    /// handled by callers via `Option::map(...).unwrap_or("vanilla")`.
+    pub fn as_modrinth(self) -> &'static str {
+        match self {
+            Self::Fabric => "fabric",
+            Self::Forge => "forge",
+            Self::NeoForge => "neoforge",
+        }
+    }
+}
+
 /// Version specifier for a loader. `Recommended` is Forge-only; Fabric has no
 /// analogous channel and rejecting it at parse time is cleaner than silently
 /// aliasing it to `Latest`.

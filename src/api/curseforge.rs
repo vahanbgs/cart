@@ -24,6 +24,16 @@ pub enum LoaderType {
     NeoForge = 6,
 }
 
+impl From<crate::LoaderKind> for LoaderType {
+    fn from(kind: crate::LoaderKind) -> Self {
+        match kind {
+            crate::LoaderKind::Fabric => Self::Fabric,
+            crate::LoaderKind::Forge => Self::Forge,
+            crate::LoaderKind::NeoForge => Self::NeoForge,
+        }
+    }
+}
+
 /// `sortField` values used by `/v1/mods/search`. Cart pins `Popularity`
 /// for the user-facing search — the rest are listed so callers don't
 /// need to hunt the CurseForge docs for the numeric values if they ever
