@@ -36,17 +36,20 @@ fn cf_client() -> anyhow::Result<Client> {
     curseforge::client(&key)
 }
 
+/// Loader for CurseForge's `modLoaderType` filter. Vanilla manifests
+/// return `None`; callers pass that straight through and CF drops the
+/// param, which is what we want.
+fn cf_loader(config: &Config<'_>) -> Option<curseforge::LoaderType> {
+    config.manifest().loader.as_ref().map(|l| l.kind.into())
+}
+
 impl Add {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         let config = Config::load(cli).await?;
         let path = config.manifest_directory().join("cart.toml");
 
-        let minecraft_version = &config.manifest().minecraft;
-        let loader = config
-            .manifest()
-            .loader
-            .as_ref()
-            .map(|l| l.kind.into());
+        let minecraft_version = config.minecraft_version();
+        let loader = cf_loader(&config);
 
         let http = cf_client()?;
 
@@ -85,9 +88,16 @@ impl Add {
 }
 
 impl Search {
-    pub async fn run(&self, _cli: &Cli) -> anyhow::Result<()> {
+    pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
+        // Same story as `find`: without a manifest we can't filter, and
+        // the point of `search` is to only show installable hits.
+        let config = Config::load(cli).await?;
+        let minecraft_version = config.minecraft_version();
+        let loader = cf_loader(&config);
+
         let http = cf_client()?;
-        let hits = curseforge::search(&http, &self.query, self.limit).await?;
+        let hits =
+            curseforge::search(&http, &self.query, self.limit, minecraft_version, loader).await?;
 
         if hits.is_empty() {
             return Ok(());
@@ -104,10 +114,13 @@ impl Find {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         // Fail fast on a missing manifest before touching the network
         // or the picker.
-        Config::load(cli).await?;
+        let config = Config::load(cli).await?;
+        let minecraft_version = config.minecraft_version();
+        let loader = cf_loader(&config);
 
         let http = cf_client()?;
-        let hits = curseforge::search(&http, &self.query, self.limit).await?;
+        let hits =
+            curseforge::search(&http, &self.query, self.limit, minecraft_version, loader).await?;
 
         if hits.is_empty() {
             tracing::info!("no results for '{}'", self.query);

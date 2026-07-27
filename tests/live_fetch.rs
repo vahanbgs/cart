@@ -129,9 +129,15 @@ async fn curseforge_search_still_returns_hits() {
         return;
     };
     let client = curseforge::client(&key).expect("build cf client");
-    let hits = curseforge::search(&client, "just enough items", 5)
-        .await
-        .expect("cf search");
+    let hits = curseforge::search(
+        &client,
+        "just enough items",
+        5,
+        "1.20.1",
+        Some(curseforge::LoaderType::Forge),
+    )
+    .await
+    .expect("cf search");
     assert!(!hits.is_empty(), "search returned no hits");
     for h in &hits {
         assert!(!h.slug.is_empty(), "hit {} has empty slug", h.id);
