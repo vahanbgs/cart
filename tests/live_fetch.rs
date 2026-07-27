@@ -106,7 +106,9 @@ async fn modrinth_resolve_still_returns_a_file() {
 #[ignore = "hits the network"]
 async fn modrinth_search_still_returns_hits() {
     let client = Client::new();
-    let hits = modrinth::search(&client, "appleskin", 3).await.unwrap();
+    let hits = modrinth::search(&client, "appleskin", 3, "1.20.1", Some("forge"))
+        .await
+        .unwrap();
     assert!(!hits.is_empty(), "search returned no hits");
     assert!(
         hits.iter().any(|h| h.slug == "appleskin"),

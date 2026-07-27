@@ -26,16 +26,28 @@ pub fn versions_url(slug: &str, game_version: &str, loader: &str) -> Url {
     url
 }
 
-/// `GET /v2/search?query=<q>&facets=[["project_type:mod"]]&limit=<n>` —
-/// the mod-typed subset of Modrinth's global project search. Used by
-/// `cart modrinth search`. Facets are always narrowed to `project_type:mod`
-/// so we don't surface shader/resource-pack/modpack hits from a bare
-/// mod-name query.
-pub fn search_url(query: &str, limit: u32) -> Url {
+/// `GET /v2/search?query=<q>&facets=<f>&limit=<n>` — the mod-typed
+/// subset of Modrinth's global project search. Used by `cart modrinth
+/// search` / `find`. Facets are AND-of-OR groups; cart always narrows
+/// to `project_type:mod` so bare mod-name queries don't surface
+/// shader/resource-pack/modpack hits, and adds `versions:<mc>` and
+/// (when the manifest declares a loader) `categories:<loader>` so the
+/// picker only shows installable hits. Modrinth stores loaders in the
+/// `categories` facet vocabulary.
+pub fn search_url(query: &str, limit: u32, minecraft_version: &str, loader: Option<&str>) -> Url {
+    let mut facets: Vec<Vec<String>> = vec![
+        vec!["project_type:mod".to_owned()],
+        vec![format!("versions:{minecraft_version}")],
+    ];
+    if let Some(loader) = loader {
+        facets.push(vec![format!("categories:{loader}")]);
+    }
+    let facets = serde_json::to_string(&facets).expect("facet vec is always serializable");
+
     let mut url = BASE_URL.join("v2/search").unwrap();
     url.query_pairs_mut()
         .append_pair("query", query)
-        .append_pair("facets", r#"[["project_type:mod"]]"#)
+        .append_pair("facets", &facets)
         .append_pair("limit", &limit.to_string());
     url
 }
@@ -169,11 +181,18 @@ pub async fn resolve(
     })
 }
 
-/// Full-text mod search, capped at `limit` hits. Ordering is Modrinth's
-/// default (server-computed relevance).
-pub async fn search(http: &Client, query: &str, limit: u32) -> anyhow::Result<Vec<SearchHit>> {
+/// Full-text mod search, filtered to results compatible with
+/// `minecraft_version` and (when supplied) `loader`. Capped at `limit`
+/// hits. Ordering is Modrinth's default (server-computed relevance).
+pub async fn search(
+    http: &Client,
+    query: &str,
+    limit: u32,
+    minecraft_version: &str,
+    loader: Option<&str>,
+) -> anyhow::Result<Vec<SearchHit>> {
     let response: SearchResponse = http
-        .get(search_url(query, limit))
+        .get(search_url(query, limit, minecraft_version, loader))
         .send()
         .await?
         .error_for_status()?
