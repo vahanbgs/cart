@@ -8,7 +8,7 @@ pub use document::{
 pub use mod_dependency::ModDependency;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     path::{Path, PathBuf},
 };
@@ -73,6 +73,32 @@ impl Manifest {
         let manifest = toml::from_str(&fs::read_to_string(path).await?)?;
 
         Ok(manifest)
+    }
+
+    /// Slugs of every Modrinth-sourced entry in `[mods]`. URL and
+    /// CurseForge entries are skipped. Used by `mr search` / `mr find`
+    /// to hide already-declared mods from search results.
+    pub fn modrinth_slugs(&self) -> HashSet<&str> {
+        self.mods
+            .values()
+            .filter_map(|m| match m {
+                ModDependency::Modrinth { modrinth, .. } => Some(modrinth.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Project ids of every CurseForge-sourced entry in `[mods]`. URL
+    /// and Modrinth entries are skipped. Used by `cf search` / `cf find`
+    /// to hide already-declared mods from search results.
+    pub fn curseforge_project_ids(&self) -> HashSet<u32> {
+        self.mods
+            .values()
+            .filter_map(|m| match m {
+                ModDependency::CurseForge { curseforge, .. } => Some(*curseforge),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -144,6 +170,51 @@ loader = { forge = "47.2.0" }
         assert_eq!(m.version.as_deref(), Some("1.2.3"));
         assert_eq!(m.authors, vec!["alice", "bob"]);
         assert_eq!(m.summary.as_deref(), Some("a demo pack"));
+    }
+
+    #[test]
+    fn modrinth_slugs_collects_only_modrinth_entries() {
+        let toml = r#"
+minecraft = "1.20.1"
+[mods]
+jei = { modrinth = "jei" }
+appleskin = { modrinth = "appleskin", disabled = true }
+custom = { url = "https://example.com/x.jar" }
+cfmod = { curseforge = 238222, file = 8419086 }
+"#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        let slugs = m.modrinth_slugs();
+        assert_eq!(slugs.len(), 2);
+        assert!(slugs.contains("jei"));
+        assert!(slugs.contains("appleskin"));
+    }
+
+    #[test]
+    fn curseforge_project_ids_collects_only_curseforge_entries() {
+        let toml = r#"
+minecraft = "1.20.1"
+[mods]
+jei = { modrinth = "jei" }
+cfmod = { curseforge = 238222, file = 8419086 }
+cfdis = { curseforge = 999, file = 111, disabled = true }
+custom = { url = "https://example.com/x.jar" }
+"#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        let ids = m.curseforge_project_ids();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&238222));
+        assert!(ids.contains(&999));
+    }
+
+    #[test]
+    fn accessors_return_empty_on_empty_mods_table() {
+        let toml = r#"
+minecraft = "1.20.1"
+[mods]
+"#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert!(m.modrinth_slugs().is_empty());
+        assert!(m.curseforge_project_ids().is_empty());
     }
 
     /// `authors` is Cargo-style plural even when only one; a bare

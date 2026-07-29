@@ -102,11 +102,25 @@ impl Search {
         let loader = search_loader(&config);
 
         let http = Client::new();
-        let hits =
+        let mut hits =
             modrinth::search(&http, &self.query, self.limit, minecraft_version, loader).await?;
 
         if hits.is_empty() {
             return Ok(());
+        }
+
+        let total = hits.len();
+        let installed = config.manifest().modrinth_slugs();
+        hits.retain(|h| !installed.contains(h.slug.as_str()));
+
+        if hits.is_empty() {
+            tracing::info!("all {total} result(s) already in cart.toml");
+            return Ok(());
+        }
+
+        let hidden = total - hits.len();
+        if hidden > 0 {
+            hit_view::print_hidden_note(hidden, total);
         }
 
         let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();
@@ -126,12 +140,26 @@ impl Find {
         let loader = search_loader(&config);
 
         let http = Client::new();
-        let hits =
+        let mut hits =
             modrinth::search(&http, &self.query, self.limit, minecraft_version, loader).await?;
 
         if hits.is_empty() {
             tracing::info!("no results for '{}'", self.query);
             return Ok(());
+        }
+
+        let total = hits.len();
+        let installed = config.manifest().modrinth_slugs();
+        hits.retain(|h| !installed.contains(h.slug.as_str()));
+
+        if hits.is_empty() {
+            tracing::info!("all {total} result(s) already in cart.toml");
+            return Ok(());
+        }
+
+        let hidden = total - hits.len();
+        if hidden > 0 {
+            hit_view::print_hidden_note(hidden, total);
         }
 
         let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();

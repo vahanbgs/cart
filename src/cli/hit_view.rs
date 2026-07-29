@@ -81,6 +81,19 @@ fn dim(s: &str) -> String {
     }
 }
 
+/// One-line dim note printed above results when the search/find filter
+/// dropped hits that are already declared in `cart.toml`. Shared between
+/// the Modrinth and CurseForge subcommands so the wording stays in one
+/// place.
+pub fn print_hidden_note(hidden: usize, total: usize) {
+    println!(
+        "{}",
+        dim(&format!(
+            "{hidden} of {total} hidden (already in cart.toml)"
+        ))
+    );
+}
+
 /// Non-interactive stdout output for `mr search` / `cf search`. A blank
 /// line between hits gives the eye something to rest on when skimming a
 /// long list.
