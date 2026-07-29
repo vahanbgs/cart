@@ -7,9 +7,13 @@
 //! than a full XML dep: the format is a flat list and the only nesting is
 //! ambient elements we don't care about.
 //!
-//! Version scheme: for Minecraft `1.X.Y`, NeoForge versions look like
-//! `X.Y.<build>` (e.g. `20.4.251` for MC 1.20.4). MC versions without a
-//! patch (`1.21`) use `.0.` in the NeoForge prefix.
+//! Version scheme (two eras):
+//! - Legacy MC `1.X[.Y]`: NeoForge versions look like `X.Y.<build>`
+//!   (e.g. `20.4.251` for MC 1.20.4). MC versions without a patch (`1.21`)
+//!   use `.0.` in the NeoForge prefix.
+//! - MC 26+ (post-`1.` rename, e.g. `26.1.2`): NeoForge versions look like
+//!   `<major>.<minor>.<patch>.<build>` (e.g. `26.1.2.92` for MC 26.1.2).
+//!   MC versions without a patch (`26.2`) use `.0.` for the patch slot.
 
 use std::sync::LazyLock;
 
@@ -110,18 +114,37 @@ impl MavenMetadata {
     }
 }
 
-/// `1.X` or `1.X.Y` → `X.Y.` (missing patch → `X.0.`). Returns None for
-/// MC versions NeoForge can't cover — anything not matching `1.<num>[.<num>]`.
+/// Maps an MC version to the leading segment of the NeoForge versions that
+/// target it. Two schemes:
+/// - Legacy `1.X[.Y]` → `X.Y.` (missing `Y` → `X.0.`).
+/// - MC 26+ `A.B[.C]` → `A.B.C.` (missing `C` → `A.B.0.`).
+///
+/// Returns `None` for MC versions NeoForge can't cover — anything with
+/// non-numeric components (snapshots like `25w40a`, betas like `b1.7.3`) or
+/// with more components than the scheme expects.
 fn neoforge_prefix(mc_version: &str) -> Option<String> {
-    let rest = mc_version.strip_prefix("1.")?;
-    let (major, minor) = match rest.split_once('.') {
-        Some((maj, min)) => (maj, min),
-        None => (rest, "0"),
+    // Legacy MC (`1.` prefix) drops it and uses a 2-component prefix; MC 26+
+    // keeps everything and uses a 3-component prefix (patch padded with `.0`
+    // when absent, matching NeoForge's own convention seen in maven-metadata).
+    let (rest, expected_parts) = match mc_version.strip_prefix("1.") {
+        Some(rest) => (rest, 2),
+        None => (mc_version, 3),
     };
-    if !major.chars().all(|c| c.is_ascii_digit()) || !minor.chars().all(|c| c.is_ascii_digit()) {
+
+    let mut parts: Vec<&str> = rest.split('.').collect();
+    if parts
+        .iter()
+        .any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()))
+    {
         return None;
     }
-    Some(format!("{major}.{minor}."))
+    if parts.len() > expected_parts {
+        return None;
+    }
+    while parts.len() < expected_parts {
+        parts.push("0");
+    }
+    Some(format!("{}.", parts.join(".")))
 }
 
 fn is_prerelease(v: &str) -> bool {
@@ -137,8 +160,8 @@ mod tests {
   <groupId>net.neoforged</groupId>
   <artifactId>neoforge</artifactId>
   <versioning>
-    <latest>21.1.242</latest>
-    <release>21.1.242</release>
+    <latest>26.1.2.92</latest>
+    <release>26.1.2.92</release>
     <versions>
       <version>20.4.99</version>
       <version>20.4.100</version>
@@ -148,6 +171,10 @@ mod tests {
       <version>21.1.241</version>
       <version>21.1.242</version>
       <version>21.1.243-rc</version>
+      <version>26.1.2.88</version>
+      <version>26.1.2.92</version>
+      <version>26.2.0.36-beta</version>
+      <version>26.2.0.37-beta</version>
     </versions>
   </versioning>
 </metadata>"#;
@@ -166,6 +193,10 @@ mod tests {
                 "21.1.241",
                 "21.1.242",
                 "21.1.243-rc",
+                "26.1.2.88",
+                "26.1.2.92",
+                "26.2.0.36-beta",
+                "26.2.0.37-beta",
             ],
             "the ambient <latest> and <release> elements must not leak in"
         );
@@ -178,6 +209,18 @@ mod tests {
         assert!(m.supports_mc("1.21.1"));
         assert!(!m.supports_mc("1.18.2"));
         assert!(!m.supports_mc("b1.7"));
+    }
+
+    /// MC 26+ dropped the `1.` prefix; NeoForge followed with a
+    /// four-component `major.minor.patch.build` version scheme. The picker
+    /// must recognise coverage for both a full `26.1.2` MC and a
+    /// patch-less `26.2` MC (which maps to a `26.2.0.` prefix).
+    #[test]
+    fn supports_mc_matches_post_one_scheme() {
+        let m = MavenMetadata::parse(XML);
+        assert!(m.supports_mc("26.1.2"));
+        assert!(m.supports_mc("26.2"));
+        assert!(!m.supports_mc("27.0.0"));
     }
 
     /// `20.4.100` > `20.4.99` as a version but < as a string. The
@@ -209,9 +252,23 @@ mod tests {
         assert_eq!(neoforge_prefix("1.20.4"), Some("20.4.".to_owned()));
     }
 
+    /// Post-`1.` MC versions map to a three-component NeoForge prefix; a
+    /// two-component MC (`26.2`) pads its patch to `.0.` the same way
+    /// `1.21` pads its minor.
     #[test]
-    fn mc_without_leading_one_returns_none() {
+    fn post_one_mc_uses_three_component_prefix() {
+        assert_eq!(neoforge_prefix("26.1.2"), Some("26.1.2.".to_owned()));
+        assert_eq!(neoforge_prefix("26.2"), Some("26.2.0.".to_owned()));
+    }
+
+    /// Snapshots and non-numeric junk have no NeoForge coverage and must
+    /// fail the parse cleanly rather than construct a bogus prefix.
+    #[test]
+    fn non_numeric_or_malformed_mc_returns_none() {
         assert!(neoforge_prefix("b1.7.3").is_none());
-        assert!(neoforge_prefix("2.0.0").is_none());
+        assert!(neoforge_prefix("25w40a").is_none());
+        assert!(neoforge_prefix("1.20.4-pre1").is_none());
+        assert!(neoforge_prefix("26.1.2.3").is_none(), "too many components");
+        assert!(neoforge_prefix("").is_none());
     }
 }
