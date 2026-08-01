@@ -14,7 +14,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
+use crossterm::cursor::MoveTo;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::execute;
+use crossterm::style::Print;
 use image::DynamicImage;
 use ratatui::{
     Frame, TerminalOptions, Viewport,
@@ -79,12 +82,25 @@ fn run_picker(
         viewport: Viewport::Inline(inline_height(rows.len())),
     })?;
     let result = run_event_loop(&mut terminal, rows, icons, prompt);
-    // Erase the inline viewport so the picker doesn't linger in scrollback.
-    // Ignore failure so it can never mask the picker's own result.
-    let _ = terminal.clear();
-    // Always restore, even on error, so a panicky terminal doesn't leave
-    // the user with a broken shell.
+    // Collapse the inline viewport so the shell prompt (or the follow-up
+    // `Add`'s tracing output) lands right where the picker started, not
+    // below up to 14 blank rows. `Terminal::clear()` alone only *blanks*
+    // the reserved rows and restores the cursor below them — we park the
+    // cursor at the viewport top-left and use the CSI `M` (Delete Line)
+    // escape to physically remove those rows, shifting anything below up.
+    //
+    // `try_restore` runs first because its `LeaveAlternateScreen`
+    // (`\x1b[?1049l`) is treated as a DECRC on xterm-family terminals —
+    // restoring a "saved cursor" we never set. If we positioned the
+    // cursor before that, it'd get yanked to a stale row and Add's
+    // tracing lines would appear far below the viewport.
+    let viewport = terminal.get_frame().area();
     ratatui::try_restore()?;
+    let _ = execute!(
+        std::io::stdout(),
+        MoveTo(viewport.x, viewport.y),
+        Print(format!("\x1b[{}M", viewport.height)),
+    );
     result
 }
 
