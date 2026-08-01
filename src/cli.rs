@@ -7,6 +7,7 @@ mod disable;
 mod enable;
 mod export;
 mod hit_view;
+mod icon_cache;
 mod init;
 mod list;
 mod modrinth;
