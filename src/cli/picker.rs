@@ -17,7 +17,7 @@ use anyhow::{Result, anyhow, bail};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use image::DynamicImage;
 use ratatui::{
-    Frame,
+    Frame, TerminalOptions, Viewport,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::Line,
@@ -39,6 +39,20 @@ const ICON_TEXT_GAP: u16 = 1;
 /// Total vertical space per row: title line + summary line. Also the
 /// icon's height, so the icon fills the row exactly.
 const ROW_HEIGHT: u16 = 2;
+/// Absolute cap on inline picker height (filter + body + help).
+/// 14 lines ≈ 6 visible mod rows before the picker starts scrolling.
+const INLINE_HEIGHT_MAX: u16 = 14;
+/// filter (1) + help (1); the body fills the remainder.
+const INLINE_HEIGHT_CHROME: u16 = 2;
+
+/// Reserve just enough inline vertical space for the current result set,
+/// capped so a huge result list doesn't swallow the terminal. Never
+/// returns zero body space — one row stays visible even for empty
+/// inputs, so a stray call still renders instead of collapsing.
+fn inline_height(num_hits: usize) -> u16 {
+    let body = (num_hits as u16).saturating_mul(ROW_HEIGHT);
+    (body + INLINE_HEIGHT_CHROME).clamp(INLINE_HEIGHT_CHROME + ROW_HEIGHT, INLINE_HEIGHT_MAX)
+}
 
 /// Interactive picker for `mr find` / `cf find`. Returns the chosen
 /// `HitRow` — callers pull `.slug` off it to build the follow-up `Add`.
@@ -61,8 +75,13 @@ fn run_picker(
     icons: Vec<Option<PathBuf>>,
     prompt: &'static str,
 ) -> Result<HitRow> {
-    let mut terminal = ratatui::try_init()?;
+    let mut terminal = ratatui::try_init_with_options(TerminalOptions {
+        viewport: Viewport::Inline(inline_height(rows.len())),
+    })?;
     let result = run_event_loop(&mut terminal, rows, icons, prompt);
+    // Erase the inline viewport so the picker doesn't linger in scrollback.
+    // Ignore failure so it can never mask the picker's own result.
+    let _ = terminal.clear();
     // Always restore, even on error, so a panicky terminal doesn't leave
     // the user with a broken shell.
     ratatui::try_restore()?;
