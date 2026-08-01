@@ -12,6 +12,7 @@ mod init;
 mod list;
 mod modrinth;
 mod new;
+mod picker;
 mod remove;
 mod run;
 mod scaffold;

@@ -11,6 +11,7 @@ use super::{
     deps::{self, PlanKind, PlannedAdd, WriteData},
     hit_view,
     icon_cache::IconCache,
+    picker::pick_hit_tui,
 };
 
 impl Modrinth {
@@ -278,8 +279,9 @@ impl Find {
         }
 
         let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();
-        let page_size = self.limit.min(15) as usize;
-        let picked = hit_view::pick_hit(rows, "Add which mod?", page_size).await?;
+        let cache = IconCache::shared()?;
+        let icons = hit_view::prefetch_icons(&cache, &rows).await;
+        let picked = pick_hit_tui(rows, icons, "Add which mod?").await?;
 
         let add = Add {
             slug: picked.slug,

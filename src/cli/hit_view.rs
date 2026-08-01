@@ -279,7 +279,7 @@ impl Display for HitChoice {
 
 /// Compact download counts: `77.0M`, `31.8k`, `310`. Both API sites use
 /// the same abbreviation on their own web UIs, so users read it fluently.
-fn format_downloads(n: u64) -> String {
+pub(super) fn format_downloads(n: u64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 1_000 {
@@ -292,7 +292,7 @@ fn format_downloads(n: u64) -> String {
 /// Truncate on character boundaries — both Modrinth descriptions and
 /// CurseForge summaries can contain multi-byte characters, and a
 /// byte-based slice would panic mid-codepoint.
-fn truncate(s: &str, max_chars: usize) -> String {
+pub(super) fn truncate(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_owned()
     } else {
