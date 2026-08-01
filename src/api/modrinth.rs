@@ -54,6 +54,7 @@ pub fn search_url(query: &str, limit: u32, minecraft_version: &str, loader: Opti
 
 #[derive(Debug, Deserialize)]
 pub struct Project {
+    pub id: String,
     pub slug: String,
     pub title: String,
 }
@@ -117,6 +118,7 @@ pub enum DependencyType {
 /// with everything callers need for both `cart add` (project title,
 /// dependencies for warnings) and `cart build` (URL to fetch).
 pub struct ResolvedVersion {
+    pub project_id: String,
     pub project_slug: String,
     pub project_title: String,
     pub version_number: String,
@@ -173,6 +175,7 @@ pub async fn resolve(
         .clone();
 
     Ok(ResolvedVersion {
+        project_id: project.id,
         project_slug: project.slug,
         project_title: project.title,
         version_number: picked.version_number,

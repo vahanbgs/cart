@@ -1,5 +1,10 @@
+use std::collections::{HashSet, VecDeque};
+use std::io::IsTerminal;
+
 use cart::api::modrinth;
+use inquire::Confirm;
 use reqwest::Client;
+use toml_edit::{DocumentMut, Item};
 
 use crate::{config::Config, manifest};
 
@@ -42,6 +47,26 @@ fn search_loader(config: &Config<'_>) -> Option<&'static str> {
         .map(|l| l.kind.as_modrinth())
 }
 
+#[derive(Clone, Copy, Debug)]
+enum PlanKind {
+    Root,
+    Required,
+    Optional,
+}
+
+struct PlannedAdd {
+    manifest_key: String,
+    slug: String,
+    title: String,
+    version_number: String,
+    kind: PlanKind,
+}
+
+struct PendingDep {
+    project_id: String,
+    kind: PlanKind,
+}
+
 impl Add {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         let config = Config::load(cli).await?;
@@ -51,7 +76,7 @@ impl Add {
         let loader = resolve_loader(&config);
 
         let http = Client::new();
-        let resolved = modrinth::resolve(
+        let root = modrinth::resolve(
             &http,
             &self.slug,
             self.version.as_deref(),
@@ -60,36 +85,189 @@ impl Add {
         )
         .await?;
 
-        for dependency in &resolved.dependencies {
-            if dependency.dependency_type == modrinth::DependencyType::Required {
-                let id = dependency.project_id.as_deref().unwrap_or("<unknown>");
-                tracing::warn!(
-                    "required dependency (modrinth project id {id}) — add it explicitly if not already present"
+        let mut document = manifest::load_document(&path).await?;
+        let existing_slugs = config.manifest().modrinth_slugs();
+        let mut planned_keys = mods_keys(&document);
+
+        let root_key = self
+            .name
+            .as_deref()
+            .unwrap_or(&root.project_slug)
+            .to_owned();
+        // Fail fast: skip network-heavy BFS if the target key is already
+        // taken. Matches `add_modrinth_mod`'s later guard but avoids doing
+        // the transitive dep walk before finding out.
+        if planned_keys.contains(&root_key) {
+            anyhow::bail!("mod already declared in [mods]: {root_key}");
+        }
+        planned_keys.insert(root_key.clone());
+
+        let mut plan: Vec<PlannedAdd> = vec![PlannedAdd {
+            manifest_key: root_key,
+            slug: root.project_slug.clone(),
+            title: root.project_title.clone(),
+            version_number: root.version_number.clone(),
+            kind: PlanKind::Root,
+        }];
+
+        // Visited holds Modrinth project ids (opaque strings) rather than
+        // slugs so a mid-flight slug rename can't cause a cycle to be missed.
+        let mut visited: HashSet<String> = HashSet::new();
+        visited.insert(root.project_id);
+
+        let mut queue: VecDeque<PendingDep> = VecDeque::new();
+        for dep in root.dependencies {
+            enqueue_dep(&mut queue, &mut visited, dep);
+        }
+
+        while let Some(pending) = queue.pop_front() {
+            // `/v2/project/{id}` accepts both slug and project id, so
+            // `resolve()` works unchanged when passed the id here.
+            let resolved = match modrinth::resolve(
+                &http,
+                &pending.project_id,
+                None,
+                minecraft_version,
+                loader,
+            )
+            .await
+            {
+                Ok(r) => r,
+                Err(err) => {
+                    tracing::warn!(
+                        "skipping modrinth dep {id}: {err}",
+                        id = pending.project_id,
+                    );
+                    continue;
+                }
+            };
+
+            if existing_slugs.contains(resolved.project_slug.as_str()) {
+                tracing::info!(
+                    "skipping {slug}: already in cart.toml",
+                    slug = resolved.project_slug,
                 );
+                continue;
+            }
+            if planned_keys.contains(&resolved.project_slug) {
+                tracing::info!(
+                    "skipping {slug}: manifest key already in use",
+                    slug = resolved.project_slug,
+                );
+                continue;
+            }
+
+            planned_keys.insert(resolved.project_slug.clone());
+            plan.push(PlannedAdd {
+                manifest_key: resolved.project_slug.clone(),
+                slug: resolved.project_slug,
+                title: resolved.project_title,
+                version_number: resolved.version_number,
+                kind: pending.kind,
+            });
+
+            for dep in resolved.dependencies {
+                enqueue_dep(&mut queue, &mut visited, dep);
             }
         }
 
-        let manifest_key = self.name.as_deref().unwrap_or(&resolved.project_slug);
+        if plan.len() > 1 {
+            print_plan(&plan);
+            if !confirm_plan(plan.len() - 1, self.yes).await? {
+                plan.truncate(1);
+            }
+        }
 
-        let mut document = manifest::load_document(&path).await?;
-        manifest::add_modrinth_mod(
-            &mut document,
-            manifest_key,
-            &resolved.project_slug,
-            &resolved.version_number,
-            self.disabled,
-        )?;
+        for entry in &plan {
+            let disabled = matches!(entry.kind, PlanKind::Root) && self.disabled;
+            manifest::add_modrinth_mod(
+                &mut document,
+                &entry.manifest_key,
+                &entry.slug,
+                &entry.version_number,
+                disabled,
+            )?;
+            tracing::info!(
+                "added {key} ({title} {ver})",
+                key = entry.manifest_key,
+                title = entry.title,
+                ver = entry.version_number,
+            );
+        }
         manifest::save_document(&path, &document).await?;
-
-        tracing::info!(
-            "added {manifest_key} ({title} {version_number}, {filename})",
-            title = resolved.project_title,
-            version_number = resolved.version_number,
-            filename = resolved.file.filename,
-        );
 
         Ok(())
     }
+}
+
+fn mods_keys(document: &DocumentMut) -> HashSet<String> {
+    document
+        .get("mods")
+        .and_then(Item::as_table)
+        .map(|t| t.iter().map(|(k, _)| k.to_owned()).collect())
+        .unwrap_or_default()
+}
+
+fn enqueue_dep(
+    queue: &mut VecDeque<PendingDep>,
+    visited: &mut HashSet<String>,
+    dep: modrinth::VersionDependency,
+) {
+    let kind = match dep.dependency_type {
+        modrinth::DependencyType::Required => PlanKind::Required,
+        modrinth::DependencyType::Optional => PlanKind::Optional,
+        modrinth::DependencyType::Embedded | modrinth::DependencyType::Incompatible => return,
+    };
+    let Some(id) = dep.project_id else {
+        tracing::warn!("modrinth dep has no project_id; skipping");
+        return;
+    };
+    if visited.insert(id.clone()) {
+        queue.push_back(PendingDep {
+            project_id: id,
+            kind,
+        });
+    }
+}
+
+fn print_plan(plan: &[PlannedAdd]) {
+    println!("Will add:");
+    let title_w = plan.iter().map(|p| p.title.len()).max().unwrap_or(0);
+    let key_w = plan.iter().map(|p| p.manifest_key.len()).max().unwrap_or(0);
+    for p in plan {
+        let tag = match p.kind {
+            PlanKind::Root => "(root)  ",
+            PlanKind::Required => "required",
+            PlanKind::Optional => "optional",
+        };
+        println!(
+            "  {tag}  {title:title_w$}  {key:key_w$}  {ver}",
+            title = p.title,
+            key = p.manifest_key,
+            ver = p.version_number,
+        );
+    }
+}
+
+/// `--yes` and a non-tty stdin both short-circuit to accept, so
+/// `cart add` stays scriptable via pipes and CI.
+async fn confirm_plan(dep_count: usize, yes: bool) -> anyhow::Result<bool> {
+    if yes {
+        return Ok(true);
+    }
+    if !std::io::stdin().is_terminal() {
+        tracing::info!("stdin is not a tty; auto-accepting {dep_count} dep(s)");
+        return Ok(true);
+    }
+    let prompt = format!(
+        "Add {dep_count} dependenc{} to cart.toml?",
+        if dep_count == 1 { "y" } else { "ies" },
+    );
+    let accepted = tokio::task::spawn_blocking(move || {
+        Confirm::new(&prompt).with_default(true).prompt()
+    })
+    .await??;
+    Ok(accepted)
 }
 
 impl Search {
@@ -171,6 +349,7 @@ impl Find {
             version: None,
             name: None,
             disabled: self.disabled,
+            yes: self.yes,
         };
         add.run(cli).await
     }
