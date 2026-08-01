@@ -19,15 +19,18 @@ use image::DynamicImage;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style, Stylize},
+    style::{Color, Modifier, Style, Stylize},
     text::Line,
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 
 use super::hit_view::{HitRow, format_downloads, truncate};
 
 const SUMMARY_MAX_CHARS: usize = 80;
+/// Left gutter for the selection bar (`▎` + one padding cell). Blank on
+/// unselected rows, so it doubles as consistent left padding.
+const CURSOR_CELLS_WIDE: u16 = 2;
 /// Icon gutter width, matching `hit_view`'s search-view constant so
 /// the picker and `search` output look consistent.
 const ICON_CELLS_WIDE: u16 = 4;
@@ -221,10 +224,6 @@ fn render(
     protocols: &mut [Option<StatefulProtocol>],
     prompt: &'static str,
 ) {
-    let outer = Block::default().borders(Borders::ALL).title(prompt);
-    let inner = outer.inner(f.area());
-    f.render_widget(outer, f.area());
-
     // Rows: filter (1), body (fill), help (1).
     let [filter_area, body_area, help_area] = Layout::default()
         .direction(Direction::Vertical)
@@ -233,10 +232,10 @@ fn render(
             Constraint::Min(1),
             Constraint::Length(1),
         ])
-        .areas(inner);
+        .areas(f.area());
 
     f.render_widget(
-        Paragraph::new(format!("> {}", state.filter)),
+        Paragraph::new(format!("{prompt} › {}", state.filter)),
         filter_area,
     );
 
@@ -276,15 +275,23 @@ fn render_row(
     protocol: Option<&mut StatefulProtocol>,
     is_selected: bool,
 ) {
-    // Split: icon gutter (fixed) + gap (fixed) + text (remaining).
-    let [icon_area, _gap, text_area] = Layout::default()
+    // Split: cursor gutter + icon gutter + gap + text.
+    let [cursor_area, icon_area, _gap, text_area] = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
+            Constraint::Length(CURSOR_CELLS_WIDE),
             Constraint::Length(ICON_CELLS_WIDE),
             Constraint::Length(ICON_TEXT_GAP),
             Constraint::Min(1),
         ])
         .areas(row_area);
+
+    if is_selected {
+        // Full-height bar spanning both rows of the entry.
+        let bar = Paragraph::new(vec![Line::from("▎"), Line::from("▎")])
+            .style(Style::default().fg(Color::LightCyan));
+        f.render_widget(bar, cursor_area);
+    }
 
     if let Some(protocol) = protocol {
         f.render_stateful_widget(StatefulImage::default(), icon_area, protocol);
@@ -292,8 +299,7 @@ fn render_row(
 
     let (header, summary) = label;
     let header_line = if is_selected {
-        Line::from(header.as_str())
-            .style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
+        Line::from(header.as_str()).style(Style::default().fg(Color::LightCyan))
     } else {
         Line::from(header.as_str())
     };
@@ -301,12 +307,7 @@ fn render_row(
         Line::from("")
     } else {
         let truncated = truncate(summary, SUMMARY_MAX_CHARS);
-        let text = format!("  {truncated}");
-        if is_selected {
-            Line::from(text).style(Style::default().add_modifier(Modifier::REVERSED))
-        } else {
-            Line::from(text).dim()
-        }
+        Line::from(format!("  {truncated}")).dim()
     };
     f.render_widget(Paragraph::new(vec![header_line, summary_line]), text_area);
 }
