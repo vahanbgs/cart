@@ -44,6 +44,7 @@ pub fn add_modrinth_mod(
     }
     inline.fmt();
     mods.insert(name, Item::Value(Value::InlineTable(inline)));
+    mods.sort_values();
 
     Ok(())
 }
@@ -72,6 +73,7 @@ pub fn add_curseforge_mod(
     }
     inline.fmt();
     mods.insert(name, Item::Value(Value::InlineTable(inline)));
+    mods.sort_values();
 
     Ok(())
 }
@@ -264,12 +266,37 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
     }
 
     #[test]
-    fn add_appends_next_to_existing_entries() {
+    fn add_places_entries_alphabetically() {
         let mut doc = parse("[mods]\nmantle = { modrinth = \"mantle\", version = \"1.0\" }\n");
         add_modrinth_mod(&mut doc, "jei", "jei", "15.2.0.27", false).unwrap();
         let out = doc.to_string();
-        assert!(out.contains(r#"mantle = { modrinth = "mantle", version = "1.0" }"#));
-        assert!(out.contains(r#"jei = { modrinth = "jei", version = "15.2.0.27" }"#));
+        let jei_pos = out.find("jei =").expect("jei entry missing");
+        let mantle_pos = out.find("mantle =").expect("mantle entry missing");
+        assert!(
+            jei_pos < mantle_pos,
+            "expected jei before mantle after alphabetical sort:\n{out}"
+        );
+    }
+
+    /// A `[mods]` block the user (or an earlier append-mode add) left in
+    /// non-alphabetical order should be fully re-sorted on the next add —
+    /// per the plan, sort scope is the whole table, not just the new key.
+    #[test]
+    fn add_modrinth_sorts_whole_table() {
+        let mut doc = parse(
+            "[mods]\n\
+             zebra = { modrinth = \"zebra\", version = \"1.0\" }\n\
+             alpha = { modrinth = \"alpha\", version = \"1.0\" }\n",
+        );
+        add_modrinth_mod(&mut doc, "mango", "mango", "1.0", false).unwrap();
+        let out = doc.to_string();
+        let alpha = out.find("alpha =").unwrap();
+        let mango = out.find("mango =").unwrap();
+        let zebra = out.find("zebra =").unwrap();
+        assert!(
+            alpha < mango && mango < zebra,
+            "expected alpha < mango < zebra:\n{out}"
+        );
     }
 
     /// The "already declared" guard is what prevents `cart add jei` from
@@ -328,6 +355,24 @@ appleskin = { url = \"https://example.com/appleskin.jar\", disabled = true }
         assert!(
             out.contains("jei = { curseforge = 238222, file = 8419086 }"),
             "jei should have no `disabled` key:\n{out}"
+        );
+    }
+
+    #[test]
+    fn add_curseforge_sorts_whole_table() {
+        let mut doc = parse(
+            "[mods]\n\
+             zebra = { curseforge = 111, file = 222 }\n\
+             alpha = { curseforge = 333, file = 444 }\n",
+        );
+        add_curseforge_mod(&mut doc, "mango", 555, 666, false).unwrap();
+        let out = doc.to_string();
+        let alpha = out.find("alpha =").unwrap();
+        let mango = out.find("mango =").unwrap();
+        let zebra = out.find("zebra =").unwrap();
+        assert!(
+            alpha < mango && mango < zebra,
+            "expected alpha < mango < zebra:\n{out}"
         );
     }
 
