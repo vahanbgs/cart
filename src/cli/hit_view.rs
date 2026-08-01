@@ -3,6 +3,7 @@ use std::io::IsTerminal;
 
 use cart::api::{curseforge, modrinth};
 use inquire::Select;
+use url::Url;
 
 /// Backend-agnostic search hit. Both Modrinth and CurseForge search
 /// responses collapse to this shape via the `From` impls below — every
@@ -14,6 +15,11 @@ pub struct HitRow {
     pub title: String,
     pub summary: String,
     pub downloads: u64,
+    /// The mod's icon on the backend's CDN. `None` when the project has
+    /// no icon uploaded, or when a future schema drift makes the field
+    /// undecodable — treated as "just render without an icon."
+    #[allow(dead_code, reason = "consumed by upcoming icon renderer")]
+    pub icon_url: Option<Url>,
 }
 
 impl From<&modrinth::SearchHit> for HitRow {
@@ -23,6 +29,7 @@ impl From<&modrinth::SearchHit> for HitRow {
             title: h.title.clone(),
             summary: h.description.clone(),
             downloads: h.downloads,
+            icon_url: h.icon_url.clone(),
         }
     }
 }
@@ -34,6 +41,7 @@ impl From<&curseforge::SearchHit> for HitRow {
             title: h.name.clone(),
             summary: h.summary.clone(),
             downloads: h.download_count,
+            icon_url: h.logo_url.clone(),
         }
     }
 }
