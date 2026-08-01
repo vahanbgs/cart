@@ -96,6 +96,15 @@ pub fn search_url(
     url
 }
 
+/// `GET /v1/mods/{id}` — direct project lookup by numeric id. Used by
+/// dep resolution to turn a `FileDependency.mod_id` into the slug that
+/// keys the manifest entry.
+pub fn project_url(project_id: u32) -> Url {
+    BASE_URL
+        .join(&format!("v1/mods/{project_id}"))
+        .unwrap()
+}
+
 /// `GET /v1/mods/{id}/files?gameVersion=<mc>[&modLoaderType=<n>]` —
 /// listed newest-first. Used by `cart update` and by loose `cart add`
 /// to pick a starting file id.
@@ -183,6 +192,8 @@ pub struct File {
     pub hashes: Vec<FileHash>,
     #[serde(default)]
     pub game_versions: Vec<String>,
+    #[serde(default)]
+    pub dependencies: Vec<FileDependency>,
 }
 
 impl File {
@@ -212,6 +223,31 @@ pub enum HashAlgo {
     Md5 = 2,
 }
 
+/// CurseForge's `relationType` values. `cart add` recursion only acts on
+/// `RequiredDependency` and `OptionalDependency`; the rest are filtered
+/// out at the CLI layer.
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+pub enum RelationType {
+    EmbeddedLibrary = 1,
+    OptionalDependency = 2,
+    RequiredDependency = 3,
+    Tool = 4,
+    Incompatible = 5,
+    Include = 6,
+}
+
+/// One entry from a `File.dependencies` array. `relation_type` is kept
+/// as `u8` on the wire (compared against `RelationType::… as u8`) so an
+/// unknown CurseForge value doesn't fail the whole file deser — mirrors
+/// how `HashAlgo::Sha1` is used against `FileHash.algo`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDependency {
+    pub mod_id: u32,
+    pub relation_type: u8,
+}
+
 /// Build a reqwest `Client` pre-loaded with the `x-api-key` header. All
 /// CurseForge endpoints require it — a missing/invalid key returns
 /// 403. Marked sensitive so proxies don't log it.
@@ -229,6 +265,18 @@ pub fn client(api_key: &str) -> anyhow::Result<Client> {
         .default_headers(headers)
         .build()
         .context("build curseforge http client")
+}
+
+/// Fetch a project by its numeric id. `find_project_by_slug`'s companion
+/// for the dep-resolution path, where a `FileDependency` only gives us
+/// the id.
+pub async fn get_project(http: &Client, project_id: u32) -> anyhow::Result<Mod> {
+    let response = http.get(project_url(project_id)).send().await?;
+    if response.status() == StatusCode::NOT_FOUND {
+        bail!("CurseForge project {project_id} not found");
+    }
+    let envelope: Envelope<Mod> = response.error_for_status()?.json().await?;
+    Ok(envelope.data)
 }
 
 /// Resolve a slug to its project. `search` returns partial matches, so

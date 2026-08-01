@@ -214,6 +214,12 @@ pub mod curseforge {
         /// Add the mod already disabled (placed as `<name>.jar.disabled`).
         #[arg(long)]
         pub disabled: bool,
+
+        /// Skip the dependency-confirmation prompt and add every resolved
+        /// dep. Non-TTY invocations already auto-accept; this is the
+        /// explicit form for scripts.
+        #[arg(short = 'y', long)]
+        pub yes: bool,
     }
 
     #[derive(Args)]
@@ -242,6 +248,10 @@ pub mod curseforge {
         /// `<name>.jar.disabled`).
         #[arg(long)]
         pub disabled: bool,
+
+        /// Skip the dependency-confirmation prompt for the chosen mod.
+        #[arg(short = 'y', long)]
+        pub yes: bool,
     }
 }
 

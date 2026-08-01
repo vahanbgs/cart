@@ -1,16 +1,14 @@
 use std::collections::{HashSet, VecDeque};
-use std::io::IsTerminal;
 
 use cart::api::modrinth;
-use inquire::Confirm;
 use reqwest::Client;
-use toml_edit::{DocumentMut, Item};
 
 use crate::{config::Config, manifest};
 
 use super::{
     Cli, Modrinth, ModrinthCommand,
     args::modrinth::{Add, Find, Search},
+    deps::{self, PlanKind, PlannedAdd, WriteData},
     hit_view,
 };
 
@@ -47,21 +45,6 @@ fn search_loader(config: &Config<'_>) -> Option<&'static str> {
         .map(|l| l.kind.as_modrinth())
 }
 
-#[derive(Clone, Copy, Debug)]
-enum PlanKind {
-    Root,
-    Required,
-    Optional,
-}
-
-struct PlannedAdd {
-    manifest_key: String,
-    slug: String,
-    title: String,
-    version_number: String,
-    kind: PlanKind,
-}
-
 struct PendingDep {
     project_id: String,
     kind: PlanKind,
@@ -87,7 +70,7 @@ impl Add {
 
         let mut document = manifest::load_document(&path).await?;
         let existing_slugs = config.manifest().modrinth_slugs();
-        let mut planned_keys = mods_keys(&document);
+        let mut planned_keys = deps::mods_keys(&document);
 
         let root_key = self
             .name
@@ -104,10 +87,13 @@ impl Add {
 
         let mut plan: Vec<PlannedAdd> = vec![PlannedAdd {
             manifest_key: root_key,
-            slug: root.project_slug.clone(),
-            title: root.project_title.clone(),
-            version_number: root.version_number.clone(),
+            display_name: root.project_title,
+            display_version: root.version_number.clone(),
             kind: PlanKind::Root,
+            write: WriteData::Modrinth {
+                slug: root.project_slug,
+                version: root.version_number,
+            },
         }];
 
         // Visited holds Modrinth project ids (opaque strings) rather than
@@ -160,10 +146,13 @@ impl Add {
             planned_keys.insert(resolved.project_slug.clone());
             plan.push(PlannedAdd {
                 manifest_key: resolved.project_slug.clone(),
-                slug: resolved.project_slug,
-                title: resolved.project_title,
-                version_number: resolved.version_number,
+                display_name: resolved.project_title,
+                display_version: resolved.version_number.clone(),
                 kind: pending.kind,
+                write: WriteData::Modrinth {
+                    slug: resolved.project_slug,
+                    version: resolved.version_number,
+                },
             });
 
             for dep in resolved.dependencies {
@@ -172,40 +161,26 @@ impl Add {
         }
 
         if plan.len() > 1 {
-            print_plan(&plan);
-            if !confirm_plan(plan.len() - 1, self.yes).await? {
+            deps::print_plan(&plan);
+            if !deps::confirm_plan(plan.len() - 1, self.yes).await? {
                 plan.truncate(1);
             }
         }
 
         for entry in &plan {
             let disabled = matches!(entry.kind, PlanKind::Root) && self.disabled;
-            manifest::add_modrinth_mod(
-                &mut document,
-                &entry.manifest_key,
-                &entry.slug,
-                &entry.version_number,
-                disabled,
-            )?;
+            entry.apply(&mut document, disabled)?;
             tracing::info!(
                 "added {key} ({title} {ver})",
                 key = entry.manifest_key,
-                title = entry.title,
-                ver = entry.version_number,
+                title = entry.display_name,
+                ver = entry.display_version,
             );
         }
         manifest::save_document(&path, &document).await?;
 
         Ok(())
     }
-}
-
-fn mods_keys(document: &DocumentMut) -> HashSet<String> {
-    document
-        .get("mods")
-        .and_then(Item::as_table)
-        .map(|t| t.iter().map(|(k, _)| k.to_owned()).collect())
-        .unwrap_or_default()
 }
 
 fn enqueue_dep(
@@ -228,46 +203,6 @@ fn enqueue_dep(
             kind,
         });
     }
-}
-
-fn print_plan(plan: &[PlannedAdd]) {
-    println!("Will add:");
-    let title_w = plan.iter().map(|p| p.title.len()).max().unwrap_or(0);
-    let key_w = plan.iter().map(|p| p.manifest_key.len()).max().unwrap_or(0);
-    for p in plan {
-        let tag = match p.kind {
-            PlanKind::Root => "(root)  ",
-            PlanKind::Required => "required",
-            PlanKind::Optional => "optional",
-        };
-        println!(
-            "  {tag}  {title:title_w$}  {key:key_w$}  {ver}",
-            title = p.title,
-            key = p.manifest_key,
-            ver = p.version_number,
-        );
-    }
-}
-
-/// `--yes` and a non-tty stdin both short-circuit to accept, so
-/// `cart add` stays scriptable via pipes and CI.
-async fn confirm_plan(dep_count: usize, yes: bool) -> anyhow::Result<bool> {
-    if yes {
-        return Ok(true);
-    }
-    if !std::io::stdin().is_terminal() {
-        tracing::info!("stdin is not a tty; auto-accepting {dep_count} dep(s)");
-        return Ok(true);
-    }
-    let prompt = format!(
-        "Add {dep_count} dependenc{} to cart.toml?",
-        if dep_count == 1 { "y" } else { "ies" },
-    );
-    let accepted = tokio::task::spawn_blocking(move || {
-        Confirm::new(&prompt).with_default(true).prompt()
-    })
-    .await??;
-    Ok(accepted)
 }
 
 impl Search {

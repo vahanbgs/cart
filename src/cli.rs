@@ -2,6 +2,7 @@ pub mod args;
 
 mod build;
 mod curseforge;
+mod deps;
 mod disable;
 mod enable;
 mod export;
