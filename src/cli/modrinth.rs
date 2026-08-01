@@ -10,6 +10,7 @@ use super::{
     args::modrinth::{Add, Find, Search},
     deps::{self, PlanKind, PlannedAdd, WriteData},
     hit_view,
+    icon_cache::IconCache,
 };
 
 impl Modrinth {
@@ -237,7 +238,8 @@ impl Search {
         }
 
         let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();
-        hit_view::print_search_results(&rows);
+        let cache = IconCache::shared()?;
+        hit_view::print_search_results(&rows, &cache).await;
 
         Ok(())
     }

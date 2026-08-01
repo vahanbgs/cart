@@ -10,12 +10,11 @@
 //! Icons that fail to fetch degrade gracefully at the call site — a
 //! transient CDN blip should never take down `cart search`.
 
-#![allow(dead_code, reason = "consumed by upcoming search/find renderers")]
-
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use directories_next::ProjectDirs;
 use reqwest::Client;
 use sha1::{Digest, Sha1};
 use tempfile::NamedTempFile;
@@ -34,6 +33,16 @@ pub struct IconCache {
 impl IconCache {
     pub fn new(root: PathBuf, http: Client) -> Self {
         Self { root, http }
+    }
+
+    /// Convenience constructor pointing at `~/.cache/cart/icons/` (or the
+    /// platform equivalent). Kept parallel to `Launcher::new` so callers
+    /// don't have to duplicate the `ProjectDirs` lookup.
+    pub fn shared() -> Result<Self> {
+        let dirs = ProjectDirs::from("", "", "cart")
+            .context("could not locate a valid home directory for the icon cache")?;
+        let root = dirs.cache_dir().join("icons");
+        Ok(Self::new(root, Client::new()))
     }
 
     /// Path where `url` would live in the cache. Pure function — does no I/O.

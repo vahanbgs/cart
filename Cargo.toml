@@ -13,6 +13,7 @@ clap_complete_nushell = "4.6"
 anyhow = "1.0.102"
 chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.2", features = ["derive"] }
+crossterm = "0.29"
 directories-next = "2.0.0"
 fs4 = "0.13"
 futures = "0.3.32"
@@ -33,4 +34,5 @@ tracing = "0.1.44"
 tracing-indicatif = "0.3"
 tracing-subscriber = { version = "0.3.23", features = ["chrono", "json", "serde", "serde_json", "tracing", "tracing-serde", "fmt", "env-filter", "regex"] }
 url = { version = "2.5.8", features = ["serde"] }
+viuer = { version = "0.11.0", features = ["icy_sixel", "print-file"] }
 zip = "8.6.0"

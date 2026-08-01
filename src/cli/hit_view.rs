@@ -1,9 +1,13 @@
 use std::fmt::{self, Display, Formatter};
 use std::io::IsTerminal;
+use std::path::PathBuf;
 
 use cart::api::{curseforge, modrinth};
+use futures::stream::StreamExt;
 use inquire::Select;
 use url::Url;
+
+use crate::cli::icon_cache::IconCache;
 
 /// Backend-agnostic search hit. Both Modrinth and CurseForge search
 /// responses collapse to this shape via the `From` impls below — every
@@ -18,7 +22,6 @@ pub struct HitRow {
     /// The mod's icon on the backend's CDN. `None` when the project has
     /// no icon uploaded, or when a future schema drift makes the field
     /// undecodable — treated as "just render without an icon."
-    #[allow(dead_code, reason = "consumed by upcoming icon renderer")]
     pub icon_url: Option<Url>,
 }
 
@@ -102,17 +105,115 @@ pub fn print_hidden_note(hidden: usize, total: usize) {
     );
 }
 
-/// Non-interactive stdout output for `mr search` / `cf search`. A blank
-/// line between hits gives the eye something to rest on when skimming a
-/// long list.
-pub fn print_search_results(rows: &[HitRow]) {
+/// Icon width in terminal cells, chosen to line up with the 2-line text
+/// height for a compact side-by-side layout. Kept small on purpose:
+/// bigger icons crowd the summary line and, on the half-block fallback,
+/// still look pixelated at any size.
+const ICON_CELLS_WIDE: u32 = 4;
+const ICON_CELLS_TALL: u32 = 2;
+/// One-cell padding between the icon and the text column.
+const ICON_TEXT_GAP: u16 = 1;
+
+/// Non-interactive stdout output for `mr search` / `cf search`.
+///
+/// When stdout is a TTY, prefetches icons via `cache` and prints each
+/// hit as `<icon>  <header>\n         <summary>\n\n`, using viuer's
+/// auto-detected terminal graphics protocol. When stdout is piped or an
+/// icon can't be fetched, falls back to the text-only layout.
+pub async fn print_search_results(rows: &[HitRow], cache: &IconCache) {
+    let render_icons = std::io::stdout().is_terminal();
+    let icons: Vec<Option<PathBuf>> = if render_icons {
+        prefetch_icons(cache, rows).await
+    } else {
+        vec![None; rows.len()]
+    };
+
     let mut first = true;
-    for row in rows {
+    for (row, icon) in rows.iter().zip(icons) {
         if !first {
             println!();
         }
-        println!("{}", render_hit(row));
         first = false;
+        print_hit_with_icon(row, icon.as_deref());
+    }
+}
+
+/// Prefetch each row's icon concurrently (bounded to 8 in-flight fetches
+/// so we don't hammer the CDN). A failed fetch → `None` → the row
+/// renders without an icon; icons are UX polish, not launch-critical.
+pub async fn prefetch_icons(cache: &IconCache, rows: &[HitRow]) -> Vec<Option<PathBuf>> {
+    let mut out: Vec<Option<PathBuf>> = vec![None; rows.len()];
+    let results: Vec<(usize, Option<PathBuf>)> = futures::stream::iter(rows.iter().enumerate())
+        .map(|(i, row)| async move {
+            let Some(url) = row.icon_url.as_ref() else {
+                return (i, None);
+            };
+            match cache.get(url).await {
+                Ok(path) => (i, Some(path)),
+                Err(err) => {
+                    tracing::debug!("icon fetch failed for row {i} ({url}): {err}");
+                    (i, None)
+                }
+            }
+        })
+        .buffer_unordered(8)
+        .collect()
+        .await;
+    for (i, path) in results {
+        out[i] = path;
+    }
+    out
+}
+
+/// Render one hit inline: icon on the left, 2-line text block indented
+/// past it. Falls through to plain text when `icon` is `None`.
+fn print_hit_with_icon(row: &HitRow, icon: Option<&std::path::Path>) {
+    use crossterm::{ExecutableCommand, cursor::MoveRight};
+
+    let indent = match icon {
+        Some(path) => {
+            let cfg = viuer::Config {
+                width: Some(ICON_CELLS_WIDE),
+                height: Some(ICON_CELLS_TALL),
+                absolute_offset: false,
+                restore_cursor: true,
+                transparent: true,
+                ..Default::default()
+            };
+            match viuer::print_from_file(path, &cfg) {
+                Ok((w, _)) => w as u16 + ICON_TEXT_GAP,
+                Err(err) => {
+                    tracing::debug!("viuer failed for {}: {err}", path.display());
+                    0
+                }
+            }
+        }
+        None => 0,
+    };
+
+    let mut stdout = std::io::stdout();
+    if indent > 0 {
+        let _ = stdout.execute(MoveRight(indent));
+    }
+    let header = format!(
+        "{title} · {slug} · {downloads}",
+        title = row.title,
+        slug = row.slug,
+        downloads = format_downloads(row.downloads),
+    );
+    println!("{header}");
+
+    // Always emit a second line even when the summary is empty, so the
+    // next entry's cursor sits below the icon's 2-cell height rather than
+    // overlapping it.
+    if indent > 0 {
+        let _ = stdout.execute(MoveRight(indent));
+    }
+    if row.summary.is_empty() {
+        println!();
+    } else {
+        let summary = truncate(&row.summary, SUMMARY_MAX_CHARS);
+        println!("  {}", dim(&summary));
     }
 }
 
