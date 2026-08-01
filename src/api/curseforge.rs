@@ -173,10 +173,16 @@ pub struct SearchHit {
 struct Logo {
     #[serde(default)]
     url: Option<Url>,
+    /// CurseForge pre-generates a 256×256 thumbnail alongside every
+    /// upload. Prefer it over `url` when present — the full-res
+    /// original is often 1024×1024+ and can take multiple seconds to
+    /// download + decode for a picker preview.
+    #[serde(default)]
+    thumbnail_url: Option<Url>,
 }
 
 fn logo_url<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Url>, D::Error> {
-    Ok(Option::<Logo>::deserialize(d)?.and_then(|l| l.url))
+    Ok(Option::<Logo>::deserialize(d)?.and_then(|l| l.thumbnail_url.or(l.url)))
 }
 
 impl SearchHit {
