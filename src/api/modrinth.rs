@@ -68,9 +68,11 @@ pub struct SearchResponse {
 }
 
 /// One search-page entry. Slimmed to what the CLI renders — Modrinth
-/// returns two dozen extra fields (categories, icon URL, gallery,
-/// license, per-loader compat, colours) that aren't shown, so decoding
-/// them costs allocations for no gain.
+/// returns two dozen extra fields (categories, gallery, license,
+/// per-loader compat, colours) that aren't shown, so decoding them
+/// costs allocations for no gain. `icon_url` is `None` when Modrinth
+/// returns `null` or an empty string (the API mixes both for projects
+/// without an uploaded icon).
 #[derive(Debug, Deserialize)]
 pub struct SearchHit {
     pub slug: String,
@@ -78,6 +80,22 @@ pub struct SearchHit {
     pub author: String,
     pub description: String,
     pub downloads: u64,
+    #[serde(default, deserialize_with = "deserialize_optional_url")]
+    pub icon_url: Option<Url>,
+}
+
+/// Modrinth returns `""` (not `null`) when a project has no icon. Serde's
+/// default `Option<Url>` deserializer errors on the empty string, so
+/// collapse `""` → `None` here.
+fn deserialize_optional_url<'de, D>(deserializer: D) -> Result<Option<Url>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: Option<String> = Option::deserialize(deserializer)?;
+    match raw.as_deref() {
+        None | Some("") => Ok(None),
+        Some(s) => Url::parse(s).map(Some).map_err(serde::de::Error::custom),
+    }
 }
 
 #[derive(Debug, Deserialize)]

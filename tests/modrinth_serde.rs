@@ -138,4 +138,15 @@ fn search_hits_deserialize_with_render_fields() {
     assert_eq!(first.author, "squeek502");
     assert!(!first.description.is_empty());
     assert!(first.downloads > 0);
+    // Modrinth's `icon_url` is what the CLI feeds to the terminal
+    // graphics renderer. The fixture's first hit has a real icon; the
+    // renderer will `None` out when the field is absent or `""`.
+    let icon = first
+        .icon_url
+        .as_ref()
+        .expect("appleskin fixture has an icon");
+    assert!(
+        icon.as_str().ends_with(".png"),
+        "unexpected icon URL: {icon}"
+    );
 }

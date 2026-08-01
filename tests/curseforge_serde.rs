@@ -143,4 +143,11 @@ fn search_hits_deserialize_with_render_fields() {
         assert!(!h.authors.is_empty(), "hit {} has no authors", h.slug);
         assert!(!h.primary_author().is_empty());
     }
+    // At least one hit in the fixture carries the nested `logo.url` we
+    // flatten into `logo_url`; without this assertion the deserializer
+    // helper could silently `None` out every entry.
+    assert!(
+        hits.iter().any(|h| h.logo_url.is_some()),
+        "no hit had a logo_url — did the `logo` field name or shape change?",
+    );
 }

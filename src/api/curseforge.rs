@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode, header};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use url::Url;
 
 static BASE_URL: LazyLock<Url> =
@@ -148,7 +148,9 @@ pub struct Mod {
 /// One search-page entry. Slimmed to what the CLI renders — CurseForge
 /// returns thirty-plus fields per hit (screenshots, categories,
 /// latestFiles, dateModified, links, …) that aren't shown, so ignoring
-/// them at the serde layer keeps the parse cheap.
+/// them at the serde layer keeps the parse cheap. `logo_url` is
+/// flattened out of the nested `logo: { url, thumbnailUrl, ... }` object
+/// (which itself may be `null` for projects without a logo).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
@@ -162,6 +164,19 @@ pub struct SearchHit {
     /// optional against future schema drift.
     #[serde(default)]
     pub authors: Vec<Author>,
+    #[serde(default, rename = "logo", deserialize_with = "logo_url")]
+    pub logo_url: Option<Url>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Logo {
+    #[serde(default)]
+    url: Option<Url>,
+}
+
+fn logo_url<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Url>, D::Error> {
+    Ok(Option::<Logo>::deserialize(d)?.and_then(|l| l.url))
 }
 
 impl SearchHit {
