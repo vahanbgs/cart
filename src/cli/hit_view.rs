@@ -165,33 +165,34 @@ pub async fn prefetch_icons(cache: &IconCache, rows: &[HitRow]) -> Vec<Option<Pa
     out
 }
 
-/// Render one hit inline: icon on the left, 2-line text block indented
-/// past it. Falls through to plain text when `icon` is `None`.
+/// Render one hit inline: 2-line text block on the right, icon
+/// overlaid in the left gutter. Falls through to plain text when
+/// `icon` is `None`.
+///
+/// The two-phase order is deliberate: we print the text *first* to
+/// force any needed vertical scroll (near the bottom of the screen),
+/// then jump the cursor back up and draw the icon in the space we
+/// just reserved. `viuer`'s own `restore_cursor: true` doesn't survive
+/// scrolling — the saved position becomes stale — which is why we do
+/// the save/restore manually around the icon draw, at a point where
+/// scrolling can no longer happen.
 fn print_hit_with_icon(row: &HitRow, icon: Option<&std::path::Path>) {
-    use crossterm::{ExecutableCommand, cursor::MoveRight};
+    use crossterm::{
+        ExecutableCommand,
+        cursor::{MoveRight, MoveToPreviousLine, RestorePosition, SavePosition},
+    };
 
-    let indent = match icon {
-        Some(path) => {
-            let cfg = viuer::Config {
-                width: Some(ICON_CELLS_WIDE),
-                height: Some(ICON_CELLS_TALL),
-                absolute_offset: false,
-                restore_cursor: true,
-                transparent: true,
-                ..Default::default()
-            };
-            match viuer::print_from_file(path, &cfg) {
-                Ok((w, _)) => w as u16 + ICON_TEXT_GAP,
-                Err(err) => {
-                    tracing::debug!("viuer failed for {}: {err}", path.display());
-                    0
-                }
-            }
-        }
-        None => 0,
+    let indent: u16 = if icon.is_some() {
+        ICON_CELLS_WIDE as u16 + ICON_TEXT_GAP
+    } else {
+        0
     };
 
     let mut stdout = std::io::stdout();
+
+    // Phase 1 — text. Header line, then a summary line (or blank so the
+    // block is always 2 rows tall, matching the icon's height and giving
+    // the "next entry" cursor a stable place to land).
     if indent > 0 {
         let _ = stdout.execute(MoveRight(indent));
     }
@@ -203,9 +204,6 @@ fn print_hit_with_icon(row: &HitRow, icon: Option<&std::path::Path>) {
     );
     println!("{header}");
 
-    // Always emit a second line even when the summary is empty, so the
-    // next entry's cursor sits below the icon's 2-cell height rather than
-    // overlapping it.
     if indent > 0 {
         let _ = stdout.execute(MoveRight(indent));
     }
@@ -214,6 +212,27 @@ fn print_hit_with_icon(row: &HitRow, icon: Option<&std::path::Path>) {
     } else {
         let summary = truncate(&row.summary, SUMMARY_MAX_CHARS);
         println!("  {}", dim(&summary));
+    }
+
+    // Phase 2 — icon. Cursor is now on the row after the text block; any
+    // scrolling has already happened. Save that row, walk up two lines,
+    // draw the icon (which overlays the text's left padding), then restore
+    // to the saved row so the next entry starts in the right place.
+    if let Some(path) = icon {
+        let _ = stdout.execute(SavePosition);
+        let _ = stdout.execute(MoveToPreviousLine(ICON_CELLS_TALL as u16));
+        let cfg = viuer::Config {
+            width: Some(ICON_CELLS_WIDE),
+            height: Some(ICON_CELLS_TALL),
+            absolute_offset: false,
+            restore_cursor: false,
+            transparent: true,
+            ..Default::default()
+        };
+        if let Err(err) = viuer::print_from_file(path, &cfg) {
+            tracing::debug!("viuer failed for {}: {err}", path.display());
+        }
+        let _ = stdout.execute(RestorePosition);
     }
 }
 
