@@ -281,7 +281,9 @@ impl Find {
         let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();
         let cache = IconCache::shared()?;
         let icons = hit_view::prefetch_icons(&cache, &rows).await;
-        let picked = pick_hit_tui(rows, icons, "Add which mod?").await?;
+        let Some(picked) = pick_hit_tui(rows, icons, "Add which mod?").await? else {
+            return Ok(());
+        };
 
         let add = Add {
             slug: picked.slug,

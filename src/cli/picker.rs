@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use image::DynamicImage;
 use ratatui::{
@@ -56,7 +56,7 @@ fn inline_height(num_hits: usize) -> u16 {
 
 /// Interactive picker for `mr find` / `cf find`. Returns the chosen
 /// `HitRow` — callers pull `.slug` off it to build the follow-up `Add`.
-/// Errors when the user cancels (Esc / Ctrl-C).
+/// Returns `Ok(None)` when the user cancels (Esc / Ctrl-C).
 ///
 /// Runs inside `spawn_blocking` because ratatui's event loop is
 /// synchronous and probing the terminal for protocol capabilities uses
@@ -65,7 +65,7 @@ pub async fn pick_hit_tui(
     rows: Vec<HitRow>,
     icons: Vec<Option<PathBuf>>,
     prompt: &'static str,
-) -> Result<HitRow> {
+) -> Result<Option<HitRow>> {
     let picked = tokio::task::spawn_blocking(move || run_picker(rows, icons, prompt)).await??;
     Ok(picked)
 }
@@ -74,7 +74,7 @@ fn run_picker(
     rows: Vec<HitRow>,
     icons: Vec<Option<PathBuf>>,
     prompt: &'static str,
-) -> Result<HitRow> {
+) -> Result<Option<HitRow>> {
     let mut terminal = ratatui::try_init_with_options(TerminalOptions {
         viewport: Viewport::Inline(inline_height(rows.len())),
     })?;
@@ -93,7 +93,7 @@ fn run_event_loop(
     rows: Vec<HitRow>,
     icons: Vec<Option<PathBuf>>,
     prompt: &'static str,
-) -> Result<HitRow> {
+) -> Result<Option<HitRow>> {
     // Probe the terminal for graphics protocol + font-size. Falls back
     // to halfblocks silently on any failure — we still get a picker,
     // just with a pixelated icon.
@@ -130,13 +130,13 @@ fn run_event_loop(
             continue;
         }
         match key_action(&key) {
-            Action::Cancel => bail!("cancelled"),
+            Action::Cancel => return Ok(None),
             Action::Confirm => {
                 let row_i = *state
                     .filtered
                     .get(state.selected)
                     .ok_or_else(|| anyhow!("no selection"))?;
-                return Ok(state.rows.swap_remove(row_i));
+                return Ok(Some(state.rows.swap_remove(row_i)));
             }
             Action::Up => {
                 if state.selected > 0 {
