@@ -1,10 +1,8 @@
-use std::fmt::{self, Display, Formatter};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use cart::api::{curseforge, modrinth};
 use futures::stream::StreamExt;
-use inquire::Select;
 use url::Url;
 
 use crate::cli::icon_cache::IconCache;
@@ -55,35 +53,9 @@ impl From<&curseforge::SearchHit> for HitRow {
 /// without pushing the primary label off-screen.
 const SUMMARY_MAX_CHARS: usize = 80;
 
-/// Render one hit as a two-line block:
-///
-/// ```text
-/// <title> · <slug> · <downloads>
-///   <dim(summary)>
-/// ```
-///
-/// No column padding — each entry sizes itself, so a long title on one
-/// row doesn't pull short titles into empty space. If `summary` is
-/// empty we skip line 2 rather than emit a dangling indent.
-fn render_hit(row: &HitRow) -> String {
-    let header = format!(
-        "{title} · {slug} · {downloads}",
-        title = row.title,
-        slug = row.slug,
-        downloads = format_downloads(row.downloads),
-    );
-    if row.summary.is_empty() {
-        header
-    } else {
-        let summary = truncate(&row.summary, SUMMARY_MAX_CHARS);
-        format!("{header}\n  {}", dim(&summary))
-    }
-}
-
 /// Wrap `s` in an ANSI "dim" (faint) SGR pair when stdout is a real
 /// terminal, otherwise return it verbatim. Kept manual to avoid pulling
-/// in a color crate for one attribute — inquire's own transitive
-/// `console` isn't usable without adding it to `Cargo.toml`.
+/// in a color crate for one attribute.
 fn dim(s: &str) -> String {
     if std::io::stdout().is_terminal() {
         format!("\x1b[2m{s}\x1b[0m")
@@ -233,47 +205,6 @@ fn print_hit_with_icon(row: &HitRow, icon: Option<&std::path::Path>) {
             tracing::debug!("viuer failed for {}: {err}", path.display());
         }
         let _ = stdout.execute(RestorePosition);
-    }
-}
-
-/// Interactive picker for `mr find` / `cf find`. Returns the chosen
-/// `HitRow` — callers pull `.slug` off it to build the follow-up `Add`.
-///
-/// inquire's `Select` is blocking; we hop off the tokio runtime with
-/// `spawn_blocking` to keep async callers safe.
-pub async fn pick_hit(
-    rows: Vec<HitRow>,
-    prompt: &'static str,
-    page_size: usize,
-) -> anyhow::Result<HitRow> {
-    let choices: Vec<HitChoice> = rows.into_iter().map(HitChoice::from_row).collect();
-    let picked = tokio::task::spawn_blocking(move || {
-        Select::new(prompt, choices)
-            .with_page_size(page_size)
-            .with_help_message("↑↓ navigate • type to filter • enter to select")
-            .prompt()
-    })
-    .await??;
-    Ok(picked.row)
-}
-
-/// inquire filters items by their `Display` output, so we pre-render the
-/// two-line label once and keep it alongside the row.
-struct HitChoice {
-    row: HitRow,
-    label: String,
-}
-
-impl HitChoice {
-    fn from_row(row: HitRow) -> Self {
-        let label = render_hit(&row);
-        HitChoice { row, label }
-    }
-}
-
-impl Display for HitChoice {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.label)
     }
 }
 
