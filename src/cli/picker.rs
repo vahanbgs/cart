@@ -622,12 +622,13 @@ fn render_row(
         // Rightside checkbox with one cell of padding on each side, so
         // the mark doesn't kiss the summary text or the row's right
         // edge. `✔` (heavy check) + bold is visibly thicker than a plain
-        // `✓` at any terminal font size — no inverse-video needed.
-        let mark = Paragraph::new(vec![Line::from(" ✔ "), Line::from("")]).style(
-            Style::default()
-                .fg(Color::LightGreen)
-                .add_modifier(Modifier::BOLD),
-        );
+        // `✓` at any terminal font size — no inverse-video needed. Color
+        // follows the row's accent so ✔ is cyan when focused, green when
+        // picked-only. `accent` is always Some here (is_picked implies
+        // Some(green) at minimum); fallback keeps types honest.
+        let color = accent.unwrap_or(Color::LightGreen);
+        let mark = Paragraph::new(vec![Line::from(" ✔ "), Line::from("")])
+            .style(Style::default().fg(color).add_modifier(Modifier::BOLD));
         f.render_widget(mark, check_area);
     }
 
