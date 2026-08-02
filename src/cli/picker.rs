@@ -602,10 +602,20 @@ fn render_row(
         ])
         .areas(row_area);
 
-    if is_selected {
+    // Two accent themes: cyan for the currently-focused row, green for
+    // tab-picked rows (matching the ✔). Focus wins when both apply —
+    // otherwise you'd lose track of the cursor amid several picks.
+    let accent = if is_selected {
+        Some(Color::LightCyan)
+    } else if is_picked {
+        Some(Color::LightGreen)
+    } else {
+        None
+    };
+    if let Some(color) = accent {
         // Full-height bar spanning both rows of the entry.
         let bar = Paragraph::new(vec![Line::from("▎"), Line::from("▎")])
-            .style(Style::default().fg(Color::LightCyan));
+            .style(Style::default().fg(color));
         f.render_widget(bar, cursor_area);
     }
     if is_picked {
@@ -626,10 +636,9 @@ fn render_row(
     }
 
     let (header, summary) = label;
-    let header_line = if is_selected {
-        Line::from(header.as_str()).style(Style::default().fg(Color::LightCyan))
-    } else {
-        Line::from(header.as_str())
+    let header_line = match accent {
+        Some(color) => Line::from(header.as_str()).style(Style::default().fg(color)),
+        None => Line::from(header.as_str()),
     };
     let summary_line = if summary.is_empty() {
         Line::from("")
