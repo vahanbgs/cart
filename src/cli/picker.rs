@@ -80,9 +80,13 @@ pub trait Backend: Send + Sync + 'static {
 }
 
 /// Live-search picker for `mr find` / `cf find`. Returns the chosen
-/// `HitRow` — callers pull `.slug` off it to build the follow-up `Add`.
-/// Returns `Ok(None)` when the user cancels (Esc / Ctrl-C) or when the
-/// event stream terminates.
+/// `HitRow`s in the order the user selected them — callers pull `.slug`
+/// off each to build follow-up `Add`s.
+///
+/// Returns an empty `Vec` when the user cancels (Esc / Ctrl-C) or when
+/// the event stream terminates. A single-element `Vec` is the common
+/// case (Enter on the highlighted row); the picker returns more than one
+/// element only once multi-select lands.
 ///
 /// `initial_query` seeds the input (empty is fine — opens the picker
 /// ready to type). `limit` caps how many hits each search asks for.
@@ -92,7 +96,7 @@ pub async fn pick_hit_interactive<B: Backend>(
     initial_query: String,
     limit: u32,
     prompt: &'static str,
-) -> Result<Option<HitRow>> {
+) -> Result<Vec<HitRow>> {
     let mut terminal = ratatui::try_init_with_options(TerminalOptions {
         viewport: Viewport::Inline(INLINE_HEIGHT),
     })?;
@@ -219,7 +223,7 @@ async fn run_event_loop<B: Backend>(
     initial_query: String,
     limit: u32,
     prompt: &'static str,
-) -> Result<Option<HitRow>> {
+) -> Result<Vec<HitRow>> {
     // Probe the terminal for graphics protocol + font-size. Falls back
     // to halfblocks silently on any failure — we still get a picker,
     // just with a pixelated icon. The probe uses blocking stdio, so
@@ -264,17 +268,17 @@ async fn run_event_loop<B: Backend>(
 
         tokio::select! {
             maybe_ev = events.next() => {
-                let Some(ev_res) = maybe_ev else { return Ok(None); };
+                let Some(ev_res) = maybe_ev else { return Ok(Vec::new()); };
                 let ev = ev_res?;
                 let Event::Key(key) = ev else { continue; };
                 if key.kind != KeyEventKind::Press && key.kind != KeyEventKind::Repeat {
                     continue;
                 }
                 match key_action(&key) {
-                    Action::Cancel => return Ok(None),
+                    Action::Cancel => return Ok(Vec::new()),
                     Action::Confirm => {
                         if state.selected < state.rows.len() {
-                            return Ok(Some(state.rows.swap_remove(state.selected)));
+                            return Ok(vec![state.rows.swap_remove(state.selected)]);
                         }
                     }
                     Action::Up => {

@@ -265,26 +265,29 @@ impl Find {
         let icon_cache = IconCache::shared()?;
         let initial_query = self.query.clone().unwrap_or_default();
 
-        let Some(picked) = pick_hit_interactive(
+        let picks = pick_hit_interactive(
             backend,
             icon_cache,
             initial_query,
             self.limit,
             "Add which mod?",
         )
-        .await?
-        else {
+        .await?;
+        if picks.is_empty() {
             return Ok(());
-        };
+        }
 
-        let add = Add {
-            slug: picked.slug,
-            version: None,
-            name: None,
-            disabled: self.disabled,
-            yes: self.yes,
-        };
-        add.run(cli).await
+        for picked in picks {
+            let add = Add {
+                slug: picked.slug,
+                version: None,
+                name: None,
+                disabled: self.disabled,
+                yes: self.yes,
+            };
+            add.run(cli).await?;
+        }
+        Ok(())
     }
 }
 
