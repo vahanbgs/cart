@@ -15,9 +15,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use crossterm::cursor::MoveTo;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::style::Print;
+use futures::StreamExt;
 use image::DynamicImage;
 use ratatui::{
     Frame, TerminalOptions, Viewport,
@@ -61,19 +62,11 @@ fn inline_height(num_hits: usize) -> u16 {
 /// `HitRow` — callers pull `.slug` off it to build the follow-up `Add`.
 /// Returns `Ok(None)` when the user cancels (Esc / Ctrl-C).
 ///
-/// Runs inside `spawn_blocking` because ratatui's event loop is
-/// synchronous and probing the terminal for protocol capabilities uses
-/// blocking stdio. The tokio runtime keeps ticking around it.
+/// Runs directly on the tokio runtime using `EventStream`, so the
+/// event loop can `.await` on timers and channels alongside key input.
+/// The terminal-graphics-protocol probe is the one bit of blocking
+/// stdio in the setup; we run it via `spawn_blocking`.
 pub async fn pick_hit_tui(
-    rows: Vec<HitRow>,
-    icons: Vec<Option<PathBuf>>,
-    prompt: &'static str,
-) -> Result<Option<HitRow>> {
-    let picked = tokio::task::spawn_blocking(move || run_picker(rows, icons, prompt)).await??;
-    Ok(picked)
-}
-
-fn run_picker(
     rows: Vec<HitRow>,
     icons: Vec<Option<PathBuf>>,
     prompt: &'static str,
@@ -81,7 +74,7 @@ fn run_picker(
     let mut terminal = ratatui::try_init_with_options(TerminalOptions {
         viewport: Viewport::Inline(inline_height(rows.len())),
     })?;
-    let result = run_event_loop(&mut terminal, rows, icons, prompt);
+    let result = run_event_loop(&mut terminal, rows, icons, prompt).await;
     // Collapse the inline viewport so the shell prompt (or the follow-up
     // `Add`'s tracing output) lands right where the picker started, not
     // below up to 14 blank rows. `Terminal::clear()` alone only *blanks*
@@ -104,7 +97,7 @@ fn run_picker(
     result
 }
 
-fn run_event_loop(
+async fn run_event_loop(
     terminal: &mut ratatui::DefaultTerminal,
     rows: Vec<HitRow>,
     icons: Vec<Option<PathBuf>>,
@@ -112,8 +105,13 @@ fn run_event_loop(
 ) -> Result<Option<HitRow>> {
     // Probe the terminal for graphics protocol + font-size. Falls back
     // to halfblocks silently on any failure — we still get a picker,
-    // just with a pixelated icon.
-    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+    // just with a pixelated icon. The probe uses blocking stdio, so
+    // hop off the async thread for the one-shot call.
+    let picker = tokio::task::spawn_blocking(|| {
+        Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks())
+    })
+    .await
+    .unwrap_or_else(|_| Picker::halfblocks());
 
     // Pre-decode each row's icon into a StatefulProtocol. Rows with no
     // icon (or a decode failure) get `None` and render an empty gutter.
@@ -135,10 +133,18 @@ fn run_event_loop(
     };
     state.recompute_filter();
 
+    let mut events = EventStream::new();
+
     loop {
         terminal.draw(|f| render(f, &mut state, &mut protocols, prompt))?;
 
-        let Event::Key(key) = crossterm::event::read()? else {
+        let event = match events.next().await {
+            Some(Ok(ev)) => ev,
+            Some(Err(err)) => return Err(err.into()),
+            None => return Ok(None),
+        };
+
+        let Event::Key(key) = event else {
             continue;
         };
         // Ignore key-up events on terminals that emit them (Windows).
@@ -293,13 +299,17 @@ fn render(
             height: ROW_HEIGHT,
         };
         let is_selected = screen_i == state.selected;
-        render_row(f, row_area, &state.labels[row_i], protocols[row_i].as_mut(), is_selected);
+        render_row(
+            f,
+            row_area,
+            &state.labels[row_i],
+            protocols[row_i].as_mut(),
+            is_selected,
+        );
     }
 
-    let help = Paragraph::new(
-        "↑↓ navigate · type to filter · enter to add · esc to cancel",
-    )
-    .style(Style::default().add_modifier(Modifier::DIM));
+    let help = Paragraph::new("↑↓ navigate · type to filter · enter to add · esc to cancel")
+        .style(Style::default().add_modifier(Modifier::DIM));
     f.render_widget(help, help_area);
 }
 
