@@ -48,10 +48,10 @@ pub enum Subcommands {
     Disable(Disable),
     Enable(Enable),
     Update(Update),
-    /// Modrinth-sourced operations (add, …).
+    /// Add a Modrinth mod: interactive picker.
     #[command(alias = "mr")]
     Modrinth(Modrinth),
-    /// CurseForge-sourced operations (add, …).
+    /// Add a CurseForge mod: interactive picker.
     #[command(alias = "cf")]
     Curseforge(Curseforge),
     /// Package the pack for redistribution: mrpack, curseforge, prism.
@@ -115,8 +115,6 @@ pub struct Modrinth {
 #[derive(Subcommand)]
 pub enum ModrinthCommand {
     Add(modrinth::Add),
-    Search(modrinth::Search),
-    Find(modrinth::Find),
 }
 
 pub mod modrinth {
@@ -124,48 +122,10 @@ pub mod modrinth {
 
     #[derive(Args)]
     pub struct Add {
-        /// Modrinth project slug.
-        pub slug: String,
-
-        /// Pin to a specific Modrinth `version_number` string. Default:
-        /// newest version compatible with the manifest's Minecraft version
-        /// and loader.
-        #[arg(long)]
-        pub version: Option<String>,
-
-        /// Key to use under `[mods]` in `cart.toml`. Default: the slug.
-        #[arg(long)]
-        pub name: Option<String>,
-
-        /// Add the mod already disabled (placed as `<name>.jar.disabled`).
-        #[arg(long)]
-        pub disabled: bool,
-
-        /// Skip the dependency-confirmation prompt and add every resolved
-        /// dep. Non-TTY invocations already auto-accept; this is the
-        /// explicit form for scripts.
-        #[arg(short = 'y', long)]
-        pub yes: bool,
-    }
-
-    #[derive(Args)]
-    pub struct Search {
-        /// Free-text query. Passed verbatim to Modrinth's `/v2/search`.
-        pub query: String,
-
-        /// Maximum number of results to print. Modrinth returns at most 100
-        /// per page; cart doesn't paginate.
-        #[arg(long, default_value_t = 10)]
-        pub limit: u32,
-    }
-
-    #[derive(Args)]
-    pub struct Find {
         /// Optional starting query. Seeds the picker's input so results
         /// appear immediately; omit to open the picker empty and type
         /// from scratch. Passed to Modrinth's `/v2/search`; you then
-        /// pick from the results to add to `[mods]`. To just browse
-        /// without adding, use `mr search` instead.
+        /// pick from the results to add to `[mods]`.
         pub query: Option<String>,
 
         /// Maximum number of results to offer in the picker.
@@ -192,8 +152,6 @@ pub struct Curseforge {
 #[derive(Subcommand)]
 pub enum CurseforgeCommand {
     Add(curseforge::Add),
-    Search(curseforge::Search),
-    Find(curseforge::Find),
 }
 
 pub mod curseforge {
@@ -201,47 +159,10 @@ pub mod curseforge {
 
     #[derive(Args)]
     pub struct Add {
-        /// CurseForge project slug.
-        pub slug: String,
-
-        /// Pin to a specific numeric CurseForge file id. Default: newest
-        /// file compatible with the manifest's Minecraft version and loader.
-        #[arg(long)]
-        pub version: Option<String>,
-
-        /// Key to use under `[mods]` in `cart.toml`. Default: the slug.
-        #[arg(long)]
-        pub name: Option<String>,
-
-        /// Add the mod already disabled (placed as `<name>.jar.disabled`).
-        #[arg(long)]
-        pub disabled: bool,
-
-        /// Skip the dependency-confirmation prompt and add every resolved
-        /// dep. Non-TTY invocations already auto-accept; this is the
-        /// explicit form for scripts.
-        #[arg(short = 'y', long)]
-        pub yes: bool,
-    }
-
-    #[derive(Args)]
-    pub struct Search {
-        /// Free-text query. Passed verbatim to CurseForge's `/v1/mods/search`.
-        pub query: String,
-
-        /// Maximum number of results to print. CurseForge's `pageSize`
-        /// cap is 50; cart doesn't paginate.
-        #[arg(long, default_value_t = 10)]
-        pub limit: u32,
-    }
-
-    #[derive(Args)]
-    pub struct Find {
         /// Optional starting query. Seeds the picker's input so results
         /// appear immediately; omit to open the picker empty and type
         /// from scratch. Passed to CurseForge's `/v1/mods/search`; you
-        /// then pick from the results to add to `[mods]`. To just browse
-        /// without adding, use `cf search` instead.
+        /// then pick from the results to add to `[mods]`.
         pub query: Option<String>,
 
         /// Maximum number of results to offer in the picker.

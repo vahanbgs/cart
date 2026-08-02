@@ -27,7 +27,7 @@ Second time around, everything's cached.
 - **Your pack is a text file.** Diff it. Commit it. `git clone`, `cart run`, play.
 - **Loose *or* pinned.** `modrinth = "jei"` picks the newest compatible build; add `version = "…"` when you need reproducibility. `cart update` bumps every loose entry at once.
 - **Modrinth + CurseForge + raw URLs.** All in the same manifest, side by side.
-- **Interactive discovery.** `cart mr find create` searches Modrinth, shows a menu, adds your pick to the manifest.
+- **Interactive discovery.** `cart mr add create` searches Modrinth, shows a menu, adds your pick to the manifest.
 - **One cache, many packs.** Try three 1.20.1 modpacks — the JEI jar sits on disk once. Everything under `~/.cache/cart/` is content-addressed and SHA-1 verified.
 - **No Java on your machine? Fine.** cart pulls the Mojang-shipped JRE for whatever Minecraft version you're launching.
 - **Forge, Fabric, NeoForge.** Bare string for "latest," a table for a pinned build, or `{ forge = "recommended" }` for the Forge stable channel.
@@ -48,15 +48,15 @@ The binary lands at `target/release/cart`. Drop it on your `PATH`.
 ```sh
 cart new mypack                # interactive: pick MC version + loader
 cd mypack
-cart mr find jei               # search Modrinth, pick from a menu
-cart mr add appleskin          # or add by slug if you already know it
+cart mr add jei                # search Modrinth, pick from a menu
 cart run                       # download + launch
 ```
 
 `cart new <path>` scaffolds a fresh directory; `cart init [path]`
-scaffolds inside an existing one (default `.`). `cart mr` (Modrinth)
-and `cart cf` (CurseForge) each expose `add`, `search`, and `find`.
-CurseForge subcommands need a `CURSEFORGE_API_KEY` in the environment.
+scaffolds inside an existing one (default `.`). `cart mr add` (Modrinth)
+and `cart cf add` (CurseForge) each open an interactive picker to search
+and add mods to the manifest. CurseForge needs a `CURSEFORGE_API_KEY` in
+the environment.
 
 ## The manifest
 
@@ -82,8 +82,8 @@ jei = { modrinth = "jei", version = "15.2.0.27" }
 appleskin = { modrinth = "appleskin" }
 
 # CurseForge — always pinned to (project id, file id).
-# `cart cf add <slug>` and `cart cf find` resolve slugs and write the
-# ids for you; CF slugs can rename, ids are permanent.
+# `cart cf add` resolves slugs and writes the ids for you; CF slugs
+# can rename, ids are permanent.
 create = { curseforge = 328085, file = 6116881 }
 
 # Raw URL — fully user-pinned; `cart update` skips these:
@@ -105,10 +105,8 @@ rejected — mods belong in `[mods]`.
 | --- | --- |
 | `cart new <path>` | Interactive setup in a fresh directory. Errors if `<path>` exists. |
 | `cart init [path]` | Same, but for an existing directory (default `.`). Errors if `cart.toml` is already there. |
-| `cart mr add <slug>` | Add a Modrinth mod. `--version` pins, `--name` overrides the manifest key, `--disabled` adds it disabled. |
-| `cart mr search <query>` | List top Modrinth matches. |
-| `cart mr find <query>` | Search Modrinth, pick from a menu, add to the manifest. |
-| `cart cf add <slug>` / `cf search` / `cf find` | Same three verbs against CurseForge. Requires `CURSEFORGE_API_KEY`. |
+| `cart mr add [query]` | Interactive: search Modrinth, pick from a menu, add to the manifest. `--disabled` adds it disabled. |
+| `cart cf add [query]` | Same, against CurseForge. Requires `CURSEFORGE_API_KEY`. |
 | `cart remove <name>` | Remove a mod entry from `[mods]`. |
 | `cart enable <name>` / `cart disable <name>` | Flip the `disabled` flag. |
 | `cart update [names...]` | Re-resolve Modrinth + CurseForge entries against the current Minecraft version. URLs are skipped. |

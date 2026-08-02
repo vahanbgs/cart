@@ -8,9 +8,9 @@ use crate::{config::Config, manifest};
 
 use super::{
     Cli, Curseforge, CurseforgeCommand,
-    args::curseforge::{Add, Find, Search},
+    args::curseforge::Add,
     deps::{self, PlanKind, PlannedAdd, WriteData},
-    hit_view::{self, HitRow},
+    hit_view::HitRow,
     icon_cache::IconCache,
     picker::{self, pick_hit_interactive},
 };
@@ -23,8 +23,6 @@ impl Curseforge {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         match &self.command {
             CurseforgeCommand::Add(add) => add.run(cli).await,
-            CurseforgeCommand::Search(search) => search.run(cli).await,
-            CurseforgeCommand::Find(find) => find.run(cli).await,
         }
     }
 }
@@ -53,128 +51,117 @@ struct PendingDep {
     kind: PlanKind,
 }
 
-impl Add {
-    pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
-        let config = Config::load(cli).await?;
-        let path = config.manifest_directory().join("cart.toml");
+async fn perform_add(cli: &Cli, slug: String, disabled: bool, yes: bool) -> anyhow::Result<()> {
+    let config = Config::load(cli).await?;
+    let path = config.manifest_directory().join("cart.toml");
 
-        let minecraft_version = config.minecraft_version();
-        let loader = cf_loader(&config);
+    let minecraft_version = config.minecraft_version();
+    let loader = cf_loader(&config);
 
-        let http = cf_client()?;
+    let http = cf_client()?;
 
-        let project = curseforge::find_project_by_slug(&http, &self.slug).await?;
-        let file = if let Some(pin) = self.version.as_deref() {
-            let file_id: u32 = pin.parse().with_context(|| {
-                format!("curseforge --version must be a numeric file id (got '{pin}')")
-            })?;
-            curseforge::fetch_file(&http, project.id, file_id).await?
-        } else {
-            curseforge::latest_file(&http, project.id, minecraft_version, loader).await?
+    let project = curseforge::find_project_by_slug(&http, &slug).await?;
+    let file = curseforge::latest_file(&http, project.id, minecraft_version, loader).await?;
+
+    let mut document = manifest::load_document(&path).await?;
+    let existing_ids = config.manifest().curseforge_project_ids();
+    let mut planned_keys = deps::mods_keys(&document);
+
+    let root_key = project.slug.clone();
+    if planned_keys.contains(&root_key) {
+        anyhow::bail!("mod already declared in [mods]: {root_key}");
+    }
+    planned_keys.insert(root_key.clone());
+
+    let mut plan: Vec<PlannedAdd> = vec![PlannedAdd {
+        manifest_key: root_key,
+        display_name: project.name.clone(),
+        display_version: file.file_name.clone(),
+        kind: PlanKind::Root,
+        write: WriteData::CurseForge {
+            project_id: project.id,
+            file_id: file.id,
+        },
+    }];
+
+    let mut visited: HashSet<u32> = HashSet::new();
+    visited.insert(project.id);
+
+    let mut queue: VecDeque<PendingDep> = VecDeque::new();
+    for dep in &file.dependencies {
+        enqueue_dep(&mut queue, &mut visited, dep);
+    }
+
+    while let Some(pending) = queue.pop_front() {
+        let dep_project = match curseforge::get_project(&http, pending.project_id).await {
+            Ok(p) => p,
+            Err(err) => {
+                tracing::warn!(
+                    "skipping curseforge dep {id}: {err}",
+                    id = pending.project_id,
+                );
+                continue;
+            }
         };
-
-        let mut document = manifest::load_document(&path).await?;
-        let existing_ids = config.manifest().curseforge_project_ids();
-        let mut planned_keys = deps::mods_keys(&document);
-
-        let root_key = self.name.as_deref().unwrap_or(&project.slug).to_owned();
-        if planned_keys.contains(&root_key) {
-            anyhow::bail!("mod already declared in [mods]: {root_key}");
+        if existing_ids.contains(&dep_project.id) {
+            tracing::info!(
+                "skipping {slug}: already in cart.toml",
+                slug = dep_project.slug,
+            );
+            continue;
         }
-        planned_keys.insert(root_key.clone());
-
-        let mut plan: Vec<PlannedAdd> = vec![PlannedAdd {
-            manifest_key: root_key,
-            display_name: project.name.clone(),
-            display_version: file.file_name.clone(),
-            kind: PlanKind::Root,
-            write: WriteData::CurseForge {
-                project_id: project.id,
-                file_id: file.id,
-            },
-        }];
-
-        let mut visited: HashSet<u32> = HashSet::new();
-        visited.insert(project.id);
-
-        let mut queue: VecDeque<PendingDep> = VecDeque::new();
-        for dep in &file.dependencies {
-            enqueue_dep(&mut queue, &mut visited, dep);
+        if planned_keys.contains(&dep_project.slug) {
+            tracing::info!(
+                "skipping {slug}: manifest key already in use",
+                slug = dep_project.slug,
+            );
+            continue;
         }
-
-        while let Some(pending) = queue.pop_front() {
-            let dep_project = match curseforge::get_project(&http, pending.project_id).await {
-                Ok(p) => p,
+        let dep_file =
+            match curseforge::latest_file(&http, dep_project.id, minecraft_version, loader).await {
+                Ok(f) => f,
                 Err(err) => {
-                    tracing::warn!(
-                        "skipping curseforge dep {id}: {err}",
-                        id = pending.project_id,
-                    );
+                    tracing::warn!("skipping {slug}: {err}", slug = dep_project.slug);
                     continue;
                 }
             };
-            if existing_ids.contains(&dep_project.id) {
-                tracing::info!(
-                    "skipping {slug}: already in cart.toml",
-                    slug = dep_project.slug,
-                );
-                continue;
-            }
-            if planned_keys.contains(&dep_project.slug) {
-                tracing::info!(
-                    "skipping {slug}: manifest key already in use",
-                    slug = dep_project.slug,
-                );
-                continue;
-            }
-            let dep_file =
-                match curseforge::latest_file(&http, dep_project.id, minecraft_version, loader)
-                    .await
-                {
-                    Ok(f) => f,
-                    Err(err) => {
-                        tracing::warn!("skipping {slug}: {err}", slug = dep_project.slug);
-                        continue;
-                    }
-                };
 
-            planned_keys.insert(dep_project.slug.clone());
-            for d in &dep_file.dependencies {
-                enqueue_dep(&mut queue, &mut visited, d);
-            }
-            plan.push(PlannedAdd {
-                manifest_key: dep_project.slug,
-                display_name: dep_project.name,
-                display_version: dep_file.file_name,
-                kind: pending.kind,
-                write: WriteData::CurseForge {
-                    project_id: dep_project.id,
-                    file_id: dep_file.id,
-                },
-            });
+        planned_keys.insert(dep_project.slug.clone());
+        for d in &dep_file.dependencies {
+            enqueue_dep(&mut queue, &mut visited, d);
         }
-
-        if plan.len() > 1 {
-            deps::print_plan(&plan);
-            if !deps::confirm_plan(plan.len() - 1, self.yes).await? {
-                plan.truncate(1);
-            }
-        }
-
-        for entry in &plan {
-            let disabled = matches!(entry.kind, PlanKind::Root) && self.disabled;
-            entry.apply(&mut document, disabled)?;
-            tracing::info!(
-                "added {key} ({title}, {filename})",
-                key = entry.manifest_key,
-                title = entry.display_name,
-                filename = entry.display_version,
-            );
-        }
-        manifest::save_document(&path, &document).await?;
-
-        Ok(())
+        plan.push(PlannedAdd {
+            manifest_key: dep_project.slug,
+            display_name: dep_project.name,
+            display_version: dep_file.file_name,
+            kind: pending.kind,
+            write: WriteData::CurseForge {
+                project_id: dep_project.id,
+                file_id: dep_file.id,
+            },
+        });
     }
+
+    if plan.len() > 1 {
+        deps::print_plan(&plan);
+        if !deps::confirm_plan(plan.len() - 1, yes).await? {
+            plan.truncate(1);
+        }
+    }
+
+    for entry in &plan {
+        let entry_disabled = matches!(entry.kind, PlanKind::Root) && disabled;
+        entry.apply(&mut document, entry_disabled)?;
+        tracing::info!(
+            "added {key} ({title}, {filename})",
+            key = entry.manifest_key,
+            title = entry.display_name,
+            filename = entry.display_version,
+        );
+    }
+    manifest::save_document(&path, &document).await?;
+
+    Ok(())
 }
 
 fn enqueue_dep(
@@ -201,45 +188,7 @@ fn enqueue_dep(
     }
 }
 
-impl Search {
-    pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
-        // Same story as `find`: without a manifest we can't filter, and
-        // the point of `search` is to only show installable hits.
-        let config = Config::load(cli).await?;
-        let minecraft_version = config.minecraft_version();
-        let loader = cf_loader(&config);
-
-        let http = cf_client()?;
-        let mut hits =
-            curseforge::search(&http, &self.query, self.limit, minecraft_version, loader).await?;
-
-        if hits.is_empty() {
-            return Ok(());
-        }
-
-        let total = hits.len();
-        let installed = config.manifest().curseforge_project_ids();
-        hits.retain(|h| !installed.contains(&h.id));
-
-        if hits.is_empty() {
-            tracing::info!("all {total} result(s) already in cart.toml");
-            return Ok(());
-        }
-
-        let hidden = total - hits.len();
-        if hidden > 0 {
-            hit_view::print_hidden_note(hidden, total);
-        }
-
-        let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();
-        let cache = IconCache::shared()?;
-        hit_view::print_search_results(&rows, &cache).await;
-
-        Ok(())
-    }
-}
-
-impl Find {
+impl Add {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         // Fail fast on a missing manifest or missing API key before
         // opening the picker.
@@ -269,20 +218,13 @@ impl Find {
         }
 
         for picked in picks {
-            let add = Add {
-                slug: picked.slug,
-                version: None,
-                name: None,
-                disabled: self.disabled,
-                yes: self.yes,
-            };
-            add.run(cli).await?;
+            perform_add(cli, picked.slug, self.disabled, self.yes).await?;
         }
         Ok(())
     }
 }
 
-/// Live-search backend for `cf find`. Owns everything the fetch loop
+/// Live-search backend for `cf add`. Owns everything the fetch loop
 /// needs (HTTP client with API key baked in, MC version, loader facet,
 /// installed project ids) so per-keystroke searches don't borrow across
 /// task boundaries.

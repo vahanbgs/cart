@@ -1,8 +1,7 @@
-//! ratatui + ratatui-image live-search picker used by `mr find` / `cf find`.
+//! ratatui + ratatui-image live-search picker used by `mr add` / `cf add`.
 //!
 //! Each row is 2 cells tall, with a 4×2 icon on the left and the
-//! 2-line title/summary text on the right — same visual language as
-//! the `search` command's inline output. The query line at the top is
+//! 2-line title/summary text on the right. The query line at the top is
 //! the *actual* search: keystrokes edit it, and after a short debounce
 //! the query hits the Modrinth / CurseForge API, filters out mods
 //! already in `cart.toml`, and refreshes the result set.
@@ -82,9 +81,9 @@ pub trait Backend: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = Result<Vec<HitRow>>> + Send;
 }
 
-/// Live-search picker for `mr find` / `cf find`. Returns the chosen
+/// Live-search picker for `mr add` / `cf add`. Returns the chosen
 /// `HitRow`s in the order the user selected them — callers pull `.slug`
-/// off each to build follow-up `Add`s.
+/// off each to add via the shared `perform_add` helper.
 ///
 /// Returns an empty `Vec` when the user cancels (Esc / Ctrl-C) or when
 /// the event stream terminates. A single-element `Vec` is the common

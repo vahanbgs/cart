@@ -21,12 +21,8 @@ cargo test               # run tests
 # Run the CLI
 cargo run -- new <path>               # scaffold a new cart project in a fresh directory (errors if <path> exists)
 cargo run -- init [path]              # scaffold in an existing directory; defaults to `.`; errors if cart.toml is already there
-cargo run -- modrinth add <slug>      # add a Modrinth mod (--version to pin, --disabled); alias: `mr add`
-cargo run -- modrinth search <query>  # list top Modrinth mod matches (--limit N); alias: `mr search`
-cargo run -- modrinth find <query>    # interactive: search, pick from menu, add to manifest; alias: `mr find`
-cargo run -- curseforge add <slug>    # add a CurseForge mod (needs CURSEFORGE_API_KEY); alias: `cf add`
-cargo run -- curseforge search <query> # list top CurseForge mod matches (--limit N); alias: `cf search`
-cargo run -- curseforge find <query>  # interactive: search, pick from menu, add to manifest; alias: `cf find`
+cargo run -- modrinth add [query]     # interactive: search Modrinth, pick from menu, add to manifest; alias: `mr add`
+cargo run -- curseforge add [query]   # interactive: search CurseForge, pick from menu, add to manifest (needs CURSEFORGE_API_KEY); alias: `cf add`
 cargo run -- export <format>          # package pack as mrpack / curseforge / prism (format modules land in a later phase)
 cargo run -- remove <name>            # remove a mod from [mods]
 cargo run -- enable <name>            # flip the `disabled` flag off
