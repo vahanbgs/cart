@@ -598,7 +598,7 @@ fn render_row(
             Constraint::Length(ICON_CELLS_WIDE),
             Constraint::Length(ICON_TEXT_GAP),
             Constraint::Min(1),
-            Constraint::Length(2), // 1-cell pad + 1-cell ✓
+            Constraint::Length(3), // pad + ✔ + pad
         ])
         .areas(row_area);
 
@@ -609,10 +609,15 @@ fn render_row(
         f.render_widget(bar, cursor_area);
     }
     if is_picked {
-        // Rightside checkbox. Leading space is the visual gap between
-        // the summary text and the mark; ✓ lands in the last cell.
-        let mark = Paragraph::new(vec![Line::from(" ✓"), Line::from("")])
-            .style(Style::default().fg(Color::LightGreen));
+        // Rightside checkbox with one cell of padding on each side, so
+        // the mark doesn't kiss the summary text or the row's right
+        // edge. `✔` (heavy check) + bold is visibly thicker than a plain
+        // `✓` at any terminal font size — no inverse-video needed.
+        let mark = Paragraph::new(vec![Line::from(" ✔ "), Line::from("")]).style(
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        );
         f.render_widget(mark, check_area);
     }
 
