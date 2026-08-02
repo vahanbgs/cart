@@ -599,15 +599,15 @@ fn render_row(
             Constraint::Min(1),
         ])
         .areas(row_area);
-    let [pick_col, bar_col] = Layout::default()
+    let [bar_col, pick_col] = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(1), Constraint::Length(1)])
         .areas(cursor_area);
 
     if is_picked {
-        // Single dot on the top line — a subtle "checked" marker that
+        // Single check on the top line — a subtle "checked" marker that
         // stays visible even when the row is also highlighted.
-        let mark = Paragraph::new(vec![Line::from("●"), Line::from("")])
+        let mark = Paragraph::new(vec![Line::from("✓"), Line::from("")])
             .style(Style::default().fg(Color::LightGreen));
         f.render_widget(mark, pick_col);
     }
