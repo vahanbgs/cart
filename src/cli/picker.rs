@@ -587,35 +587,33 @@ fn render_row(
     is_selected: bool,
     is_picked: bool,
 ) {
-    // Split: cursor gutter + icon gutter + gap + text. The cursor gutter
-    // in turn splits into two 1-cell columns so the pick mark and
-    // highlight bar occupy their own column and can co-exist.
-    let [cursor_area, icon_area, _gap, text_area] = Layout::default()
+    // Left-to-right: cursor gutter (highlight bar) + icon gutter + gap +
+    // text + far-right check gutter. The check lives on the right edge
+    // so it reads as a rightside checkbox — separate from the cyan
+    // highlight bar that hugs the left edge.
+    let [cursor_area, icon_area, _gap, text_area, check_area] = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(CURSOR_CELLS_WIDE),
             Constraint::Length(ICON_CELLS_WIDE),
             Constraint::Length(ICON_TEXT_GAP),
             Constraint::Min(1),
+            Constraint::Length(2), // 1-cell pad + 1-cell ✓
         ])
         .areas(row_area);
-    let [bar_col, pick_col] = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(1), Constraint::Length(1)])
-        .areas(cursor_area);
 
-    if is_picked {
-        // Single check on the top line — a subtle "checked" marker that
-        // stays visible even when the row is also highlighted.
-        let mark = Paragraph::new(vec![Line::from("✓"), Line::from("")])
-            .style(Style::default().fg(Color::LightGreen));
-        f.render_widget(mark, pick_col);
-    }
     if is_selected {
         // Full-height bar spanning both rows of the entry.
         let bar = Paragraph::new(vec![Line::from("▎"), Line::from("▎")])
             .style(Style::default().fg(Color::LightCyan));
-        f.render_widget(bar, bar_col);
+        f.render_widget(bar, cursor_area);
+    }
+    if is_picked {
+        // Rightside checkbox. Leading space is the visual gap between
+        // the summary text and the mark; ✓ lands in the last cell.
+        let mark = Paragraph::new(vec![Line::from(" ✓"), Line::from("")])
+            .style(Style::default().fg(Color::LightGreen));
+        f.render_widget(mark, check_area);
     }
 
     if let Some(protocol) = protocol {
