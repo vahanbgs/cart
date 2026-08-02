@@ -41,9 +41,12 @@ use super::hit_view::{HitRow, format_downloads, icon_urls, prefetch_icons, trunc
 use super::icon_cache::IconCache;
 
 const SUMMARY_MAX_CHARS: usize = 80;
-/// Left gutter for the selection bar (`▎` + one padding cell). Blank on
-/// unselected rows, so it doubles as consistent left padding.
-const CURSOR_CELLS_WIDE: u16 = 2;
+/// Left gutter width for the selection bar. One cell — the `▎` glyph
+/// sits flush against the icon column so the accent stripe reads as a
+/// solid edge, not a gutter with a hole. Blank on unselected rows,
+/// where it also doubles as a 1-cell left indent so icons stay
+/// column-aligned across selected / unselected states.
+const CURSOR_CELLS_WIDE: u16 = 1;
 /// Icon gutter width, matching `hit_view`'s search-view constant so
 /// the picker and `search` output look consistent.
 const ICON_CELLS_WIDE: u16 = 4;
