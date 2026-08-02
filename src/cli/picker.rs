@@ -598,7 +598,7 @@ fn render_row(
             Constraint::Length(ICON_CELLS_WIDE),
             Constraint::Length(ICON_TEXT_GAP),
             Constraint::Min(1),
-            Constraint::Length(3), // pad + ✔ + pad
+            Constraint::Length(4), // 1-cell left pad + ✔ + 2-cell right pad
         ])
         .areas(row_area);
 
@@ -627,7 +627,7 @@ fn render_row(
         // picked-only. `accent` is always Some here (is_picked implies
         // Some(green) at minimum); fallback keeps types honest.
         let color = accent.unwrap_or(Color::LightGreen);
-        let mark = Paragraph::new(vec![Line::from(" ✔ "), Line::from("")])
+        let mark = Paragraph::new(vec![Line::from(" ✔  "), Line::from("")])
             .style(Style::default().fg(color).add_modifier(Modifier::BOLD));
         f.render_widget(mark, check_area);
     }
