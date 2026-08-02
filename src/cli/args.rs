@@ -23,6 +23,12 @@ pub struct Cli {
     #[arg(short = 'C', long = "directory", value_name = "DIR", global = true)]
     pub directory: Option<PathBuf>,
 
+    /// Path to `cart.toml`. Mirrors cargo's `--manifest-path`. The file
+    /// must be named `cart.toml`. A relative path is resolved against
+    /// `-C`/`--directory` if given, otherwise against the current dir.
+    #[arg(long = "manifest-path", value_name = "PATH", global = true)]
+    pub manifest_path: Option<PathBuf>,
+
     /// Increase log verbosity: default = info, `-v` = debug, `-vv` = trace.
     /// `RUST_LOG` overrides both if set.
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]

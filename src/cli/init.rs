@@ -34,6 +34,7 @@ mod tests {
     fn cli_for(path: std::path::PathBuf) -> Cli {
         Cli {
             directory: None,
+            manifest_path: None,
             verbose: 0,
             minecraft_version: None,
             command: Subcommands::Init(Init { path }),

@@ -10,7 +10,7 @@ pub struct Config<'cli> {
 
 impl<'cli> Config<'cli> {
     pub async fn load(cli: &'cli Cli) -> anyhow::Result<Self> {
-        let (manifest_directory, manifest_path) = match cli.manifest_path() {
+        let (manifest_directory, manifest_path) = match cli.resolve_manifest_paths()? {
             Some(paths) => paths,
             None => Manifest::locate().await?,
         };

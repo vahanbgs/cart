@@ -25,6 +25,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cli = Cli {
             directory: None,
+            manifest_path: None,
             verbose: 0,
             minecraft_version: None,
             command: Subcommands::New(New {
