@@ -13,7 +13,7 @@
 //! visible-window + per-row layout is ~40 lines and gets us the icons
 //! we want.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -156,6 +156,13 @@ struct PickerState {
     cache: HashMap<String, (Vec<HitRow>, Vec<Option<PathBuf>>)>,
     /// FIFO insertion order for `cache`, capped at `QUERY_CACHE_MAX`.
     cache_order: VecDeque<String>,
+    /// Rows the user has tab-picked, in the order they tapped Tab.
+    /// Survives query changes and cache hits — the picker returns this
+    /// verbatim on Enter (or a fallback of `[highlighted]` when empty).
+    picked: Vec<HitRow>,
+    /// O(1) `contains` lookup for `picked`, keyed by slug. The picker
+    /// session is bound to one backend so the slug namespace is stable.
+    picked_slugs: HashSet<String>,
 }
 
 impl PickerState {
@@ -169,6 +176,20 @@ impl PickerState {
             status: Status::Idle,
             cache: HashMap::new(),
             cache_order: VecDeque::new(),
+            picked: Vec::new(),
+            picked_slugs: HashSet::new(),
+        }
+    }
+
+    fn toggle_pick(&mut self) {
+        let Some(row) = self.rows.get(self.selected) else {
+            return;
+        };
+        if self.picked_slugs.remove(&row.slug) {
+            self.picked.retain(|r| r.slug != row.slug);
+        } else {
+            self.picked_slugs.insert(row.slug.clone());
+            self.picked.push(row.clone());
         }
     }
 
@@ -277,8 +298,11 @@ async fn run_event_loop<B: Backend>(
                 match key_action(&key) {
                     Action::Cancel => return Ok(Vec::new()),
                     Action::Confirm => {
-                        if state.selected < state.rows.len() {
-                            return Ok(vec![state.rows.swap_remove(state.selected)]);
+                        if !state.picked.is_empty() {
+                            return Ok(std::mem::take(&mut state.picked));
+                        }
+                        if let Some(row) = state.rows.get(state.selected) {
+                            return Ok(vec![row.clone()]);
                         }
                     }
                     Action::Up => {
@@ -291,6 +315,7 @@ async fn run_event_loop<B: Backend>(
                             state.selected += 1;
                         }
                     }
+                    Action::Toggle => state.toggle_pick(),
                     Action::AppendChar(c) => {
                         state.query.push(c);
                         on_query_change(
@@ -449,6 +474,7 @@ enum Action {
     Confirm,
     Up,
     Down,
+    Toggle,
     AppendChar(char),
     Backspace,
     Noop,
@@ -461,6 +487,7 @@ fn key_action(key: &KeyEvent) -> Action {
         (KeyCode::Enter, _) => Action::Confirm,
         (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => Action::Up,
         (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => Action::Down,
+        (KeyCode::Tab, _) => Action::Toggle,
         (KeyCode::Backspace, _) => Action::Backspace,
         (KeyCode::Char(c), m)
             if !m.contains(KeyModifiers::CONTROL) && !m.contains(KeyModifiers::ALT) =>
@@ -522,20 +549,27 @@ fn render(
                 height: ROW_HEIGHT,
             };
             let is_selected = row_i == state.selected;
+            let is_picked = state.picked_slugs.contains(&state.rows[row_i].slug);
             render_row(
                 f,
                 row_area,
                 &state.labels[row_i],
                 protocols.get_mut(row_i).and_then(|o| o.as_mut()),
                 is_selected,
+                is_picked,
             );
         }
     }
 
-    let help_text = match &state.status {
+    let base = match &state.status {
         Status::Searching => "Searching…".to_owned(),
         Status::Error(err) => format!("error: {}", first_line(err)),
-        Status::Idle => "↑↓ navigate · type to search · enter to add · esc to cancel".to_owned(),
+        Status::Idle => "↑↓ navigate · tab pick · enter add · esc cancel".to_owned(),
+    };
+    let help_text = if state.picked.is_empty() {
+        base
+    } else {
+        format!("[{n} picked] · {base}", n = state.picked.len())
     };
     let help = Paragraph::new(help_text).style(Style::default().add_modifier(Modifier::DIM));
     f.render_widget(help, help_area);
@@ -551,8 +585,11 @@ fn render_row(
     label: &(String, String),
     protocol: Option<&mut StatefulProtocol>,
     is_selected: bool,
+    is_picked: bool,
 ) {
-    // Split: cursor gutter + icon gutter + gap + text.
+    // Split: cursor gutter + icon gutter + gap + text. The cursor gutter
+    // in turn splits into two 1-cell columns so the pick mark and
+    // highlight bar occupy their own column and can co-exist.
     let [cursor_area, icon_area, _gap, text_area] = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -562,12 +599,23 @@ fn render_row(
             Constraint::Min(1),
         ])
         .areas(row_area);
+    let [pick_col, bar_col] = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .areas(cursor_area);
 
+    if is_picked {
+        // Single dot on the top line — a subtle "checked" marker that
+        // stays visible even when the row is also highlighted.
+        let mark = Paragraph::new(vec![Line::from("●"), Line::from("")])
+            .style(Style::default().fg(Color::LightGreen));
+        f.render_widget(mark, pick_col);
+    }
     if is_selected {
         // Full-height bar spanning both rows of the entry.
         let bar = Paragraph::new(vec![Line::from("▎"), Line::from("▎")])
             .style(Style::default().fg(Color::LightCyan));
-        f.render_widget(bar, cursor_area);
+        f.render_widget(bar, bar_col);
     }
 
     if let Some(protocol) = protocol {
