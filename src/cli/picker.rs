@@ -1,9 +1,11 @@
-//! ratatui + ratatui-image picker used by `mr find` / `cf find`.
+//! ratatui + ratatui-image live-search picker used by `mr find` / `cf find`.
 //!
 //! Each row is 2 cells tall, with a 4×2 icon on the left and the
 //! 2-line title/summary text on the right — same visual language as
-//! the `search` command's inline output, but with a live selection
-//! cursor and typed-filter narrowing.
+//! the `search` command's inline output. The query line at the top is
+//! the *actual* search: keystrokes edit it, and after a short debounce
+//! the query hits the Modrinth / CurseForge API, filters out mods
+//! already in `cart.toml`, and refreshes the result set.
 //!
 //! We hand-roll the list rendering instead of using ratatui's `List`
 //! widget: `List` puts styled text in `ListItem`s, but there's no
@@ -11,9 +13,12 @@
 //! visible-window + per-row layout is ~40 lines and gets us the icons
 //! we want.
 
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use crossterm::cursor::MoveTo;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -28,8 +33,12 @@ use ratatui::{
     widgets::Paragraph,
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use tokio::time::{Instant, sleep_until};
 
-use super::hit_view::{HitRow, format_downloads, truncate};
+use super::hit_view::{HitRow, format_downloads, icon_urls, prefetch_icons, truncate};
+use super::icon_cache::IconCache;
 
 const SUMMARY_MAX_CHARS: usize = 80;
 /// Left gutter for the selection bar (`▎` + one padding cell). Blank on
@@ -43,41 +52,64 @@ const ICON_TEXT_GAP: u16 = 1;
 /// Total vertical space per row: title line + summary line. Also the
 /// icon's height, so the icon fills the row exactly.
 const ROW_HEIGHT: u16 = 2;
-/// Absolute cap on inline picker height (filter + body + help).
-/// 14 lines ≈ 6 visible mod rows before the picker starts scrolling.
-const INLINE_HEIGHT_MAX: u16 = 14;
-/// filter (1) + help (1); the body fills the remainder.
-const INLINE_HEIGHT_CHROME: u16 = 2;
+/// Fixed inline viewport height: query (1) + body (12) + help (1).
+/// The result set changes over time so we can't grow / shrink the
+/// viewport with it; reserving the full 14 rows up front keeps the
+/// picker's on-screen footprint stable across queries.
+const INLINE_HEIGHT: u16 = 14;
+/// How long to wait after the last keystroke before firing a fetch.
+/// Long enough to absorb a fluent typist between-key gap; short
+/// enough that a deliberate pause fires visibly quickly.
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
+/// How many distinct queries to keep in the session cache before
+/// evicting the oldest. Bounded so backspace-then-retype paths are
+/// instant without letting a lot of unique queries balloon memory.
+const QUERY_CACHE_MAX: usize = 64;
 
-/// Reserve just enough inline vertical space for the current result set,
-/// capped so a huge result list doesn't swallow the terminal. Never
-/// returns zero body space — one row stays visible even for empty
-/// inputs, so a stray call still renders instead of collapsing.
-fn inline_height(num_hits: usize) -> u16 {
-    let body = (num_hits as u16).saturating_mul(ROW_HEIGHT);
-    (body + INLINE_HEIGHT_CHROME).clamp(INLINE_HEIGHT_CHROME + ROW_HEIGHT, INLINE_HEIGHT_MAX)
+/// A search backend for the interactive picker: Modrinth or CurseForge.
+/// Impls capture per-session state (HTTP client, MC version, loader,
+/// already-installed slugs / project ids) and return backend-blind
+/// `HitRow`s. The installed-filter lives inside the impl so the picker
+/// stays backend-blind.
+pub trait Backend: Send + Sync + 'static {
+    fn search(
+        &self,
+        query: String,
+        limit: u32,
+    ) -> impl std::future::Future<Output = Result<Vec<HitRow>>> + Send;
 }
 
-/// Interactive picker for `mr find` / `cf find`. Returns the chosen
+/// Live-search picker for `mr find` / `cf find`. Returns the chosen
 /// `HitRow` — callers pull `.slug` off it to build the follow-up `Add`.
-/// Returns `Ok(None)` when the user cancels (Esc / Ctrl-C).
+/// Returns `Ok(None)` when the user cancels (Esc / Ctrl-C) or when the
+/// event stream terminates.
 ///
-/// Runs directly on the tokio runtime using `EventStream`, so the
-/// event loop can `.await` on timers and channels alongside key input.
-/// The terminal-graphics-protocol probe is the one bit of blocking
-/// stdio in the setup; we run it via `spawn_blocking`.
-pub async fn pick_hit_tui(
-    rows: Vec<HitRow>,
-    icons: Vec<Option<PathBuf>>,
+/// `initial_query` seeds the input (empty is fine — opens the picker
+/// ready to type). `limit` caps how many hits each search asks for.
+pub async fn pick_hit_interactive<B: Backend>(
+    backend: B,
+    icon_cache: IconCache,
+    initial_query: String,
+    limit: u32,
     prompt: &'static str,
 ) -> Result<Option<HitRow>> {
     let mut terminal = ratatui::try_init_with_options(TerminalOptions {
-        viewport: Viewport::Inline(inline_height(rows.len())),
+        viewport: Viewport::Inline(INLINE_HEIGHT),
     })?;
-    let result = run_event_loop(&mut terminal, rows, icons, prompt).await;
+    let backend = Arc::new(backend);
+    let icon_cache = Arc::new(icon_cache);
+    let result = run_event_loop(
+        &mut terminal,
+        backend,
+        icon_cache,
+        initial_query,
+        limit,
+        prompt,
+    )
+    .await;
     // Collapse the inline viewport so the shell prompt (or the follow-up
     // `Add`'s tracing output) lands right where the picker started, not
-    // below up to 14 blank rows. `Terminal::clear()` alone only *blanks*
+    // below the reserved rows. `Terminal::clear()` alone only *blanks*
     // the reserved rows and restores the cursor below them — we park the
     // cursor at the viewport top-left and use the CSI `M` (Delete Line)
     // escape to physically remove those rows, shifting anything below up.
@@ -97,10 +129,95 @@ pub async fn pick_hit_tui(
     result
 }
 
-async fn run_event_loop(
-    terminal: &mut ratatui::DefaultTerminal,
+#[derive(Clone)]
+enum Status {
+    Idle,
+    Searching,
+    Error(String),
+}
+
+struct PickerState {
+    query: String,
     rows: Vec<HitRow>,
-    icons: Vec<Option<PathBuf>>,
+    /// Pre-rendered (header, summary) per row. Rebuilt whenever `rows`
+    /// changes so `render` stays alloc-light on the hot path.
+    labels: Vec<(String, String)>,
+    /// Index into `rows` of the currently highlighted entry.
+    selected: usize,
+    /// First visible entry in `rows` — scroll window start.
+    scroll: usize,
+    status: Status,
+    /// Per-session cache of `lowercased-query` → `(rows, icon paths)`.
+    /// Backspace-then-retype avoids a network round-trip.
+    cache: HashMap<String, (Vec<HitRow>, Vec<Option<PathBuf>>)>,
+    /// FIFO insertion order for `cache`, capped at `QUERY_CACHE_MAX`.
+    cache_order: VecDeque<String>,
+}
+
+impl PickerState {
+    fn new(initial_query: String) -> Self {
+        Self {
+            query: initial_query,
+            rows: Vec::new(),
+            labels: Vec::new(),
+            selected: 0,
+            scroll: 0,
+            status: Status::Idle,
+            cache: HashMap::new(),
+            cache_order: VecDeque::new(),
+        }
+    }
+
+    fn adjust_scroll(&mut self, visible_rows: usize) {
+        if visible_rows == 0 || self.rows.is_empty() {
+            self.scroll = 0;
+            return;
+        }
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if self.selected >= self.scroll + visible_rows {
+            self.scroll = self.selected + 1 - visible_rows;
+        }
+    }
+
+    fn set_rows(&mut self, rows: Vec<HitRow>) {
+        self.labels = rows.iter().map(render_label_lines).collect();
+        self.rows = rows;
+        self.selected = 0;
+        self.scroll = 0;
+    }
+
+    fn cache_insert(&mut self, query: String, rows: Vec<HitRow>, icons: Vec<Option<PathBuf>>) {
+        if !self.cache.contains_key(&query) {
+            self.cache_order.push_back(query.clone());
+            if self.cache_order.len() > QUERY_CACHE_MAX
+                && let Some(evict) = self.cache_order.pop_front()
+            {
+                self.cache.remove(&evict);
+            }
+        }
+        self.cache.insert(query, (rows, icons));
+    }
+}
+
+enum Msg {
+    Fetched {
+        query: String,
+        rows: Vec<HitRow>,
+        icons: Vec<Option<PathBuf>>,
+    },
+    Failed {
+        query: String,
+        err: String,
+    },
+}
+
+async fn run_event_loop<B: Backend>(
+    terminal: &mut ratatui::DefaultTerminal,
+    backend: Arc<B>,
+    icon_cache: Arc<IconCache>,
+    initial_query: String,
+    limit: u32,
     prompt: &'static str,
 ) -> Result<Option<HitRow>> {
     // Probe the terminal for graphics protocol + font-size. Falls back
@@ -113,78 +230,214 @@ async fn run_event_loop(
     .await
     .unwrap_or_else(|_| Picker::halfblocks());
 
-    // Pre-decode each row's icon into a StatefulProtocol. Rows with no
-    // icon (or a decode failure) get `None` and render an empty gutter.
-    // Decoding is one-shot; the widget handles resize/encode on area
-    // change from there.
-    let mut protocols: Vec<Option<StatefulProtocol>> = icons
-        .into_iter()
-        .map(|opt| opt.and_then(|path| decode_protocol(&picker, &path)))
-        .collect();
-
-    let labels: Vec<(String, String)> = rows.iter().map(render_label_lines).collect();
-    let mut state = PickerState {
-        rows,
-        labels,
-        filter: String::new(),
-        filtered: Vec::new(),
-        selected: 0,
-        scroll: 0,
-    };
-    state.recompute_filter();
+    let mut state = PickerState::new(initial_query);
+    let mut protocols: Vec<Option<StatefulProtocol>> = Vec::new();
 
     let mut events = EventStream::new();
+    let (tx, mut rx) = mpsc::channel::<Msg>(4);
+    let mut inflight: Option<JoinHandle<()>> = None;
+
+    // Debounce timer. Starts already-elapsed but gated by
+    // `debounce_active`, so it never fires spuriously. Reset via
+    // `Sleep::reset` on each query change.
+    let sleep = sleep_until(Instant::now());
+    tokio::pin!(sleep);
+    let mut debounce_active = false;
+
+    // If we opened with a non-empty initial query, kick off the fetch
+    // immediately (no debounce) so results appear as soon as the picker
+    // paints.
+    if !state.query.is_empty() {
+        fire_fetch(
+            &backend,
+            &icon_cache,
+            &state.query,
+            limit,
+            &tx,
+            &mut inflight,
+            &mut state.status,
+        );
+    }
 
     loop {
         terminal.draw(|f| render(f, &mut state, &mut protocols, prompt))?;
 
-        let event = match events.next().await {
-            Some(Ok(ev)) => ev,
-            Some(Err(err)) => return Err(err.into()),
-            None => return Ok(None),
-        };
+        tokio::select! {
+            maybe_ev = events.next() => {
+                let Some(ev_res) = maybe_ev else { return Ok(None); };
+                let ev = ev_res?;
+                let Event::Key(key) = ev else { continue; };
+                if key.kind != KeyEventKind::Press && key.kind != KeyEventKind::Repeat {
+                    continue;
+                }
+                match key_action(&key) {
+                    Action::Cancel => return Ok(None),
+                    Action::Confirm => {
+                        if state.selected < state.rows.len() {
+                            return Ok(Some(state.rows.swap_remove(state.selected)));
+                        }
+                    }
+                    Action::Up => {
+                        if state.selected > 0 {
+                            state.selected -= 1;
+                        }
+                    }
+                    Action::Down => {
+                        if state.selected + 1 < state.rows.len() {
+                            state.selected += 1;
+                        }
+                    }
+                    Action::AppendChar(c) => {
+                        state.query.push(c);
+                        on_query_change(
+                            &mut state,
+                            &mut protocols,
+                            &picker,
+                            &mut inflight,
+                            sleep.as_mut(),
+                            &mut debounce_active,
+                        );
+                    }
+                    Action::Backspace => {
+                        state.query.pop();
+                        on_query_change(
+                            &mut state,
+                            &mut protocols,
+                            &picker,
+                            &mut inflight,
+                            sleep.as_mut(),
+                            &mut debounce_active,
+                        );
+                    }
+                    Action::Noop => {}
+                }
+            }
 
-        let Event::Key(key) = event else {
-            continue;
-        };
-        // Ignore key-up events on terminals that emit them (Windows).
-        if key.kind != KeyEventKind::Press && key.kind != KeyEventKind::Repeat {
-            continue;
-        }
-        match key_action(&key) {
-            Action::Cancel => return Ok(None),
-            Action::Confirm => {
-                let row_i = *state
-                    .filtered
-                    .get(state.selected)
-                    .ok_or_else(|| anyhow!("no selection"))?;
-                return Ok(Some(state.rows.swap_remove(row_i)));
-            }
-            Action::Up => {
-                if state.selected > 0 {
-                    state.selected -= 1;
+            _ = &mut sleep, if debounce_active => {
+                debounce_active = false;
+                if !state.query.is_empty() {
+                    fire_fetch(
+                        &backend,
+                        &icon_cache,
+                        &state.query,
+                        limit,
+                        &tx,
+                        &mut inflight,
+                        &mut state.status,
+                    );
                 }
             }
-            Action::Down => {
-                if state.selected + 1 < state.filtered.len() {
-                    state.selected += 1;
+
+            Some(msg) = rx.recv() => {
+                match msg {
+                    Msg::Fetched { query, rows, icons } => {
+                        state.cache_insert(query.clone(), rows.clone(), icons.clone());
+                        if query == state.query {
+                            protocols = build_protocols(&icons, &picker);
+                            state.set_rows(rows);
+                            state.status = Status::Idle;
+                        }
+                    }
+                    Msg::Failed { query, err } => {
+                        if query == state.query {
+                            state.status = Status::Error(err);
+                        }
+                    }
                 }
             }
-            Action::AppendFilter(c) => {
-                state.filter.push(c);
-                state.recompute_filter();
-                state.selected = 0;
-                state.scroll = 0;
-            }
-            Action::PopFilter => {
-                state.filter.pop();
-                state.recompute_filter();
-                state.selected = 0;
-                state.scroll = 0;
-            }
-            Action::Noop => {}
         }
     }
+}
+
+/// Called after the user edits the query. Cancels any pending fetch,
+/// serves from the session cache when possible, and otherwise arms the
+/// debounce timer so a fresh fetch fires after the user pauses typing.
+/// Stale rows stay visible until fresh ones arrive.
+fn on_query_change(
+    state: &mut PickerState,
+    protocols: &mut Vec<Option<StatefulProtocol>>,
+    picker: &Picker,
+    inflight: &mut Option<JoinHandle<()>>,
+    mut sleep: std::pin::Pin<&mut tokio::time::Sleep>,
+    debounce_active: &mut bool,
+) {
+    if let Some(handle) = inflight.take() {
+        handle.abort();
+    }
+
+    if state.query.is_empty() {
+        state.set_rows(Vec::new());
+        protocols.clear();
+        state.status = Status::Idle;
+        *debounce_active = false;
+        return;
+    }
+
+    if let Some((rows, icons)) = state.cache.get(&state.query) {
+        *protocols = build_protocols(icons, picker);
+        state.set_rows(rows.clone());
+        state.status = Status::Idle;
+        *debounce_active = false;
+        return;
+    }
+
+    sleep.as_mut().reset(Instant::now() + SEARCH_DEBOUNCE);
+    *debounce_active = true;
+}
+
+/// Spawn the actual search + icon-prefetch task, replacing any prior
+/// in-flight fetch. Result lands on `tx`; the receiver checks `query`
+/// against the current input before applying so stale hits are ignored
+/// (but still get cached for later reuse).
+fn fire_fetch<B: Backend>(
+    backend: &Arc<B>,
+    icon_cache: &Arc<IconCache>,
+    query: &str,
+    limit: u32,
+    tx: &mpsc::Sender<Msg>,
+    inflight: &mut Option<JoinHandle<()>>,
+    status: &mut Status,
+) {
+    if let Some(handle) = inflight.take() {
+        handle.abort();
+    }
+    let b = backend.clone();
+    let c = icon_cache.clone();
+    let q = query.to_owned();
+    let tx = tx.clone();
+    *status = Status::Searching;
+    *inflight = Some(tokio::spawn(async move {
+        let msg = do_fetch(b, c, q, limit).await;
+        let _ = tx.send(msg).await;
+    }));
+}
+
+/// Standalone helper so the compiler can infer HRTB lifetimes cleanly
+/// on the `prefetch_icons` closure — inlining this into `fire_fetch`'s
+/// `tokio::spawn` state machine confuses rustc's HRTB inference.
+async fn do_fetch<B: Backend>(
+    backend: Arc<B>,
+    icon_cache: Arc<IconCache>,
+    query: String,
+    limit: u32,
+) -> Msg {
+    match backend.search(query.clone(), limit).await {
+        Ok(rows) => {
+            let icons = prefetch_icons(icon_cache.as_ref(), icon_urls(&rows)).await;
+            Msg::Fetched { query, rows, icons }
+        }
+        Err(e) => {
+            let err = format!("{e:#}");
+            Msg::Failed { query, err }
+        }
+    }
+}
+
+fn build_protocols(icons: &[Option<PathBuf>], picker: &Picker) -> Vec<Option<StatefulProtocol>> {
+    icons
+        .iter()
+        .map(|opt| opt.as_ref().and_then(|p| decode_protocol(picker, p)))
+        .collect()
 }
 
 enum Action {
@@ -192,8 +445,8 @@ enum Action {
     Confirm,
     Up,
     Down,
-    AppendFilter(char),
-    PopFilter,
+    AppendChar(char),
+    Backspace,
     Noop,
 }
 
@@ -204,58 +457,13 @@ fn key_action(key: &KeyEvent) -> Action {
         (KeyCode::Enter, _) => Action::Confirm,
         (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => Action::Up,
         (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => Action::Down,
-        (KeyCode::Backspace, _) => Action::PopFilter,
+        (KeyCode::Backspace, _) => Action::Backspace,
         (KeyCode::Char(c), m)
             if !m.contains(KeyModifiers::CONTROL) && !m.contains(KeyModifiers::ALT) =>
         {
-            Action::AppendFilter(c)
+            Action::AppendChar(c)
         }
         _ => Action::Noop,
-    }
-}
-
-struct PickerState {
-    rows: Vec<HitRow>,
-    /// Pre-rendered (header, summary) per row. Summary is `""` when the
-    /// mod has none. Kept as two strings so we can style them
-    /// differently — header at full brightness, summary dimmed.
-    labels: Vec<(String, String)>,
-    filter: String,
-    /// Indices into `rows` that match the current filter, in order.
-    filtered: Vec<usize>,
-    /// Index into `filtered` (NOT `rows`) of the currently highlighted
-    /// entry. Reset to 0 whenever the filter changes.
-    selected: usize,
-    /// First visible entry in `filtered` — scroll window start.
-    scroll: usize,
-}
-
-impl PickerState {
-    fn recompute_filter(&mut self) {
-        let needle = self.filter.to_lowercase();
-        self.filtered = self
-            .labels
-            .iter()
-            .enumerate()
-            .filter(|(_, (h, s))| {
-                needle.is_empty()
-                    || h.to_lowercase().contains(&needle)
-                    || s.to_lowercase().contains(&needle)
-            })
-            .map(|(i, _)| i)
-            .collect();
-    }
-
-    /// Keep the selection within the visible window by adjusting `scroll`.
-    fn adjust_scroll(&mut self, visible_rows: usize) {
-        if visible_rows == 0 {
-            return;
-        }
-        if self.selected < self.scroll {
-            self.scroll = self.selected;
-        } else if self.selected >= self.scroll + visible_rows {
-            self.scroll = self.selected + 1 - visible_rows;
-        }
     }
 }
 
@@ -265,8 +473,8 @@ fn render(
     protocols: &mut [Option<StatefulProtocol>],
     prompt: &'static str,
 ) {
-    // Rows: filter (1), body (fill), help (1).
-    let [filter_area, body_area, help_area] = Layout::default()
+    // Rows: query (1), body (fill), help (1).
+    let [query_area, body_area, help_area] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
@@ -276,41 +484,61 @@ fn render(
         .areas(f.area());
 
     f.render_widget(
-        Paragraph::new(format!("{prompt} › {}", state.filter)),
-        filter_area,
+        Paragraph::new(format!("{prompt} › {}", state.query)),
+        query_area,
     );
 
-    // Body: fixed-height rows, `ROW_HEIGHT` tall each.
-    let visible_rows = (body_area.height / ROW_HEIGHT) as usize;
-    state.adjust_scroll(visible_rows);
-
-    for (screen_i, &row_i) in state
-        .filtered
-        .iter()
-        .enumerate()
-        .skip(state.scroll)
-        .take(visible_rows)
-    {
-        let row_y = body_area.y + ((screen_i - state.scroll) as u16) * ROW_HEIGHT;
-        let row_area = Rect {
-            x: body_area.x,
-            y: row_y,
-            width: body_area.width,
-            height: ROW_HEIGHT,
+    if state.rows.is_empty() {
+        let hint = if state.query.is_empty() {
+            "Type to search"
+        } else {
+            match &state.status {
+                Status::Searching => "Searching…",
+                Status::Error(_) => "no results",
+                Status::Idle => "no results",
+            }
         };
-        let is_selected = screen_i == state.selected;
-        render_row(
-            f,
-            row_area,
-            &state.labels[row_i],
-            protocols[row_i].as_mut(),
-            is_selected,
+        f.render_widget(
+            Paragraph::new(hint).style(Style::default().add_modifier(Modifier::DIM)),
+            body_area,
         );
+    } else {
+        let visible_rows = (body_area.height / ROW_HEIGHT) as usize;
+        state.adjust_scroll(visible_rows);
+
+        for (screen_i, row_i) in (state.scroll..state.rows.len())
+            .take(visible_rows)
+            .enumerate()
+        {
+            let row_y = body_area.y + (screen_i as u16) * ROW_HEIGHT;
+            let row_area = Rect {
+                x: body_area.x,
+                y: row_y,
+                width: body_area.width,
+                height: ROW_HEIGHT,
+            };
+            let is_selected = row_i == state.selected;
+            render_row(
+                f,
+                row_area,
+                &state.labels[row_i],
+                protocols.get_mut(row_i).and_then(|o| o.as_mut()),
+                is_selected,
+            );
+        }
     }
 
-    let help = Paragraph::new("↑↓ navigate · type to filter · enter to add · esc to cancel")
-        .style(Style::default().add_modifier(Modifier::DIM));
+    let help_text = match &state.status {
+        Status::Searching => "Searching…".to_owned(),
+        Status::Error(err) => format!("error: {}", first_line(err)),
+        Status::Idle => "↑↓ navigate · type to search · enter to add · esc to cancel".to_owned(),
+    };
+    let help = Paragraph::new(help_text).style(Style::default().add_modifier(Modifier::DIM));
     f.render_widget(help, help_area);
+}
+
+fn first_line(s: &str) -> &str {
+    s.split_once('\n').map(|(a, _)| a).unwrap_or(s)
 }
 
 fn render_row(

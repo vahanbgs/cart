@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 use cart::api::curseforge;
 use reqwest::Client;
 
@@ -10,9 +10,9 @@ use super::{
     Cli, Curseforge, CurseforgeCommand,
     args::curseforge::{Add, Find, Search},
     deps::{self, PlanKind, PlannedAdd, WriteData},
-    hit_view,
+    hit_view::{self, HitRow},
     icon_cache::IconCache,
-    picker::pick_hit_tui,
+    picker::{self, pick_hit_interactive},
 };
 
 /// Env var holding the CurseForge API key. Only read when a CurseForge
@@ -127,20 +127,16 @@ impl Add {
                 );
                 continue;
             }
-            let dep_file = match curseforge::latest_file(
-                &http,
-                dep_project.id,
-                minecraft_version,
-                loader,
-            )
-            .await
-            {
-                Ok(f) => f,
-                Err(err) => {
-                    tracing::warn!("skipping {slug}: {err}", slug = dep_project.slug);
-                    continue;
-                }
-            };
+            let dep_file =
+                match curseforge::latest_file(&http, dep_project.id, minecraft_version, loader)
+                    .await
+                {
+                    Ok(f) => f,
+                    Err(err) => {
+                        tracing::warn!("skipping {slug}: {err}", slug = dep_project.slug);
+                        continue;
+                    }
+                };
 
             planned_keys.insert(dep_project.slug.clone());
             for d in &dep_file.dependencies {
@@ -245,39 +241,30 @@ impl Search {
 
 impl Find {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
-        // Fail fast on a missing manifest before touching the network
-        // or the picker.
+        // Fail fast on a missing manifest or missing API key before
+        // opening the picker.
         let config = Config::load(cli).await?;
-        let minecraft_version = config.minecraft_version();
         let loader = cf_loader(&config);
-
         let http = cf_client()?;
-        let mut hits =
-            curseforge::search(&http, &self.query, self.limit, minecraft_version, loader).await?;
 
-        if hits.is_empty() {
-            tracing::info!("no results for '{}'", self.query);
-            return Ok(());
-        }
+        let backend = CurseforgeBackend {
+            http,
+            minecraft_version: config.minecraft_version().to_owned(),
+            loader,
+            installed: config.manifest().curseforge_project_ids(),
+        };
+        let icon_cache = IconCache::shared()?;
+        let initial_query = self.query.clone().unwrap_or_default();
 
-        let total = hits.len();
-        let installed = config.manifest().curseforge_project_ids();
-        hits.retain(|h| !installed.contains(&h.id));
-
-        if hits.is_empty() {
-            tracing::info!("all {total} result(s) already in cart.toml");
-            return Ok(());
-        }
-
-        let hidden = total - hits.len();
-        if hidden > 0 {
-            hit_view::print_hidden_note(hidden, total);
-        }
-
-        let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();
-        let cache = IconCache::shared()?;
-        let icons = hit_view::prefetch_icons(&cache, &rows).await;
-        let Some(picked) = pick_hit_tui(rows, icons, "Add which mod?").await? else {
+        let Some(picked) = pick_hit_interactive(
+            backend,
+            icon_cache,
+            initial_query,
+            self.limit,
+            "Add which mod?",
+        )
+        .await?
+        else {
             return Ok(());
         };
 
@@ -289,5 +276,34 @@ impl Find {
             yes: self.yes,
         };
         add.run(cli).await
+    }
+}
+
+/// Live-search backend for `cf find`. Owns everything the fetch loop
+/// needs (HTTP client with API key baked in, MC version, loader facet,
+/// installed project ids) so per-keystroke searches don't borrow across
+/// task boundaries.
+struct CurseforgeBackend {
+    http: Client,
+    minecraft_version: String,
+    loader: Option<curseforge::LoaderType>,
+    installed: HashSet<u32>,
+}
+
+impl picker::Backend for CurseforgeBackend {
+    async fn search(&self, query: String, limit: u32) -> Result<Vec<HitRow>> {
+        let hits = curseforge::search(
+            &self.http,
+            &query,
+            limit,
+            &self.minecraft_version,
+            self.loader,
+        )
+        .await?;
+        Ok(hits
+            .iter()
+            .filter(|h| !self.installed.contains(&h.id))
+            .map(Into::into)
+            .collect())
     }
 }

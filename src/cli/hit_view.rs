@@ -12,6 +12,10 @@ use crate::cli::icon_cache::IconCache;
 /// field-name difference (`title`/`name`, `description`/`summary`,
 /// `downloads`/`download_count`) is bridged in one place so the renderer
 /// stays backend-blind.
+///
+/// `Clone` so the live-search picker can stash hits in its per-session
+/// query cache and hand out fresh copies on cache hit without re-fetching.
+#[derive(Clone)]
 pub struct HitRow {
     pub slug: String,
     pub title: String,
@@ -95,7 +99,7 @@ const ICON_TEXT_GAP: u16 = 1;
 pub async fn print_search_results(rows: &[HitRow], cache: &IconCache) {
     let render_icons = std::io::stdout().is_terminal();
     let icons: Vec<Option<PathBuf>> = if render_icons {
-        prefetch_icons(cache, rows).await
+        prefetch_icons(cache, icon_urls(rows)).await
     } else {
         vec![None; rows.len()]
     };
@@ -110,31 +114,45 @@ pub async fn print_search_results(rows: &[HitRow], cache: &IconCache) {
     }
 }
 
-/// Prefetch each row's icon concurrently (bounded to 8 in-flight fetches
-/// so we don't hammer the CDN). A failed fetch → `None` → the row
-/// renders without an icon; icons are UX polish, not launch-critical.
-pub async fn prefetch_icons(cache: &IconCache, rows: &[HitRow]) -> Vec<Option<PathBuf>> {
-    let mut out: Vec<Option<PathBuf>> = vec![None; rows.len()];
-    let results: Vec<(usize, Option<PathBuf>)> = futures::stream::iter(rows.iter().enumerate())
-        .map(|(i, row)| async move {
-            let Some(url) = row.icon_url.as_ref() else {
-                return (i, None);
-            };
-            match cache.get(url).await {
-                Ok(path) => (i, Some(path)),
-                Err(err) => {
-                    tracing::debug!("icon fetch failed for row {i} ({url}): {err}");
-                    (i, None)
+/// Prefetch a batch of icons concurrently (bounded to 8 in-flight
+/// fetches so we don't hammer the CDN). A failed fetch → `None` → the
+/// row renders without an icon; icons are UX polish, not launch-critical.
+///
+/// Takes owned `Vec<Option<Url>>` instead of `&[HitRow]` on purpose:
+/// the picker's live-search path awaits this future inside a
+/// `tokio::spawn`, and rustc's HRTB inference for closures over
+/// borrowed slices fails to prove `Send` there. Owning the URLs sidesteps
+/// the borrow entirely.
+pub async fn prefetch_icons(cache: &IconCache, urls: Vec<Option<Url>>) -> Vec<Option<PathBuf>> {
+    let mut out: Vec<Option<PathBuf>> = vec![None; urls.len()];
+    let results: Vec<(usize, Option<PathBuf>)> =
+        futures::stream::iter(urls.into_iter().enumerate())
+            .map(|(i, url)| async move {
+                let Some(url) = url else {
+                    return (i, None);
+                };
+                match cache.get(&url).await {
+                    Ok(path) => (i, Some(path)),
+                    Err(err) => {
+                        tracing::debug!("icon fetch failed for row {i} ({url}): {err}");
+                        (i, None)
+                    }
                 }
-            }
-        })
-        .buffer_unordered(8)
-        .collect()
-        .await;
+            })
+            .buffer_unordered(8)
+            .collect()
+            .await;
     for (i, path) in results {
         out[i] = path;
     }
     out
+}
+
+/// Convenience: pull each row's icon URL for handing to `prefetch_icons`.
+/// Kept here so both `hit_view` renderers and the picker share one
+/// conversion.
+pub fn icon_urls(rows: &[HitRow]) -> Vec<Option<Url>> {
+    rows.iter().map(|r| r.icon_url.clone()).collect()
 }
 
 /// Render one hit inline: 2-line text block on the right, icon

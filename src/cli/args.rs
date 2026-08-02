@@ -161,10 +161,12 @@ pub mod modrinth {
 
     #[derive(Args)]
     pub struct Find {
-        /// Free-text query. Passed to Modrinth's `/v2/search`; you then
-        /// pick from the results to add to `[mods]`. To just browse without
-        /// adding, use `mr search` instead.
-        pub query: String,
+        /// Optional starting query. Seeds the picker's input so results
+        /// appear immediately; omit to open the picker empty and type
+        /// from scratch. Passed to Modrinth's `/v2/search`; you then
+        /// pick from the results to add to `[mods]`. To just browse
+        /// without adding, use `mr search` instead.
+        pub query: Option<String>,
 
         /// Maximum number of results to offer in the picker.
         #[arg(long, default_value_t = 10)]
@@ -235,10 +237,12 @@ pub mod curseforge {
 
     #[derive(Args)]
     pub struct Find {
-        /// Free-text query. Passed to CurseForge's `/v1/mods/search`; you
+        /// Optional starting query. Seeds the picker's input so results
+        /// appear immediately; omit to open the picker empty and type
+        /// from scratch. Passed to CurseForge's `/v1/mods/search`; you
         /// then pick from the results to add to `[mods]`. To just browse
         /// without adding, use `cf search` instead.
-        pub query: String,
+        pub query: Option<String>,
 
         /// Maximum number of results to offer in the picker.
         #[arg(long, default_value_t = 10)]

@@ -1,5 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
+use anyhow::Result;
 use cart::api::modrinth;
 use reqwest::Client;
 
@@ -9,9 +10,9 @@ use super::{
     Cli, Modrinth, ModrinthCommand,
     args::modrinth::{Add, Find, Search},
     deps::{self, PlanKind, PlannedAdd, WriteData},
-    hit_view,
+    hit_view::{self, HitRow},
     icon_cache::IconCache,
-    picker::pick_hit_tui,
+    picker::{self, pick_hit_interactive},
 };
 
 impl Modrinth {
@@ -122,10 +123,7 @@ impl Add {
             {
                 Ok(r) => r,
                 Err(err) => {
-                    tracing::warn!(
-                        "skipping modrinth dep {id}: {err}",
-                        id = pending.project_id,
-                    );
+                    tracing::warn!("skipping modrinth dep {id}: {err}", id = pending.project_id,);
                     continue;
                 }
             };
@@ -249,39 +247,33 @@ impl Search {
 impl Find {
     pub async fn run(&self, cli: &Cli) -> anyhow::Result<()> {
         // Fail fast if there's no manifest to add to — better than
-        // spending a network round-trip and a picker interaction
-        // before finding out.
+        // spending a picker interaction before finding out.
         let config = Config::load(cli).await?;
-        let minecraft_version = config.minecraft_version();
         let loader = search_loader(&config);
 
-        let http = Client::new();
-        let mut hits =
-            modrinth::search(&http, &self.query, self.limit, minecraft_version, loader).await?;
+        let backend = ModrinthBackend {
+            http: Client::new(),
+            minecraft_version: config.minecraft_version().to_owned(),
+            loader,
+            installed: config
+                .manifest()
+                .modrinth_slugs()
+                .into_iter()
+                .map(|s| s.to_owned())
+                .collect(),
+        };
+        let icon_cache = IconCache::shared()?;
+        let initial_query = self.query.clone().unwrap_or_default();
 
-        if hits.is_empty() {
-            tracing::info!("no results for '{}'", self.query);
-            return Ok(());
-        }
-
-        let total = hits.len();
-        let installed = config.manifest().modrinth_slugs();
-        hits.retain(|h| !installed.contains(h.slug.as_str()));
-
-        if hits.is_empty() {
-            tracing::info!("all {total} result(s) already in cart.toml");
-            return Ok(());
-        }
-
-        let hidden = total - hits.len();
-        if hidden > 0 {
-            hit_view::print_hidden_note(hidden, total);
-        }
-
-        let rows: Vec<hit_view::HitRow> = hits.iter().map(Into::into).collect();
-        let cache = IconCache::shared()?;
-        let icons = hit_view::prefetch_icons(&cache, &rows).await;
-        let Some(picked) = pick_hit_tui(rows, icons, "Add which mod?").await? else {
+        let Some(picked) = pick_hit_interactive(
+            backend,
+            icon_cache,
+            initial_query,
+            self.limit,
+            "Add which mod?",
+        )
+        .await?
+        else {
             return Ok(());
         };
 
@@ -293,5 +285,33 @@ impl Find {
             yes: self.yes,
         };
         add.run(cli).await
+    }
+}
+
+/// Live-search backend for `mr find`. Owns the HTTP client, MC version,
+/// loader facet, and installed-slug set for the whole picker session so
+/// each keystroke's fetch can be constructed with no shared borrowing.
+struct ModrinthBackend {
+    http: Client,
+    minecraft_version: String,
+    loader: Option<&'static str>,
+    installed: HashSet<String>,
+}
+
+impl picker::Backend for ModrinthBackend {
+    async fn search(&self, query: String, limit: u32) -> Result<Vec<HitRow>> {
+        let hits = modrinth::search(
+            &self.http,
+            &query,
+            limit,
+            &self.minecraft_version,
+            self.loader,
+        )
+        .await?;
+        Ok(hits
+            .iter()
+            .filter(|h| !self.installed.contains(h.slug.as_str()))
+            .map(Into::into)
+            .collect())
     }
 }
