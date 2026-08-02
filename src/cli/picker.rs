@@ -143,6 +143,10 @@ enum Status {
 struct PickerState {
     query: String,
     rows: Vec<HitRow>,
+    /// Icon path per row, parallel to `rows`. Snapshotted at pick time
+    /// so the empty-query "review your picks" body can rebuild
+    /// protocols without another disk lookup.
+    icons: Vec<Option<PathBuf>>,
     /// Pre-rendered (header, summary) per row. Rebuilt whenever `rows`
     /// changes so `render` stays alloc-light on the hot path.
     labels: Vec<(String, String)>,
@@ -160,6 +164,11 @@ struct PickerState {
     /// Survives query changes and cache hits — the picker returns this
     /// verbatim on Enter (or a fallback of `[highlighted]` when empty).
     picked: Vec<HitRow>,
+    /// Icon path per pick, parallel to `picked`. Snapshotted from
+    /// `icons[selected]` when the row is Tab-picked, so the empty-query
+    /// picks-view can render the same icons even after the source
+    /// search results have been discarded.
+    picked_icons: Vec<Option<PathBuf>>,
     /// O(1) `contains` lookup for `picked`, keyed by slug. The picker
     /// session is bound to one backend so the slug namespace is stable.
     picked_slugs: HashSet<String>,
@@ -170,6 +179,7 @@ impl PickerState {
         Self {
             query: initial_query,
             rows: Vec::new(),
+            icons: Vec::new(),
             labels: Vec::new(),
             selected: 0,
             scroll: 0,
@@ -177,6 +187,7 @@ impl PickerState {
             cache: HashMap::new(),
             cache_order: VecDeque::new(),
             picked: Vec::new(),
+            picked_icons: Vec::new(),
             picked_slugs: HashSet::new(),
         }
     }
@@ -186,10 +197,15 @@ impl PickerState {
             return;
         };
         if self.picked_slugs.remove(&row.slug) {
-            self.picked.retain(|r| r.slug != row.slug);
+            if let Some(idx) = self.picked.iter().position(|r| r.slug == row.slug) {
+                self.picked.remove(idx);
+                self.picked_icons.remove(idx);
+            }
         } else {
             self.picked_slugs.insert(row.slug.clone());
+            let icon = self.icons.get(self.selected).cloned().unwrap_or(None);
             self.picked.push(row.clone());
+            self.picked_icons.push(icon);
         }
     }
 
@@ -205,9 +221,10 @@ impl PickerState {
         }
     }
 
-    fn set_rows(&mut self, rows: Vec<HitRow>) {
+    fn set_rows(&mut self, rows: Vec<HitRow>, icons: Vec<Option<PathBuf>>) {
         self.labels = rows.iter().map(render_label_lines).collect();
         self.rows = rows;
+        self.icons = icons;
         self.selected = 0;
         self.scroll = 0;
     }
@@ -315,7 +332,12 @@ async fn run_event_loop<B: Backend>(
                             state.selected += 1;
                         }
                     }
-                    Action::Toggle => state.toggle_pick(),
+                    Action::Toggle => {
+                        state.toggle_pick();
+                        if state.query.is_empty() {
+                            refresh_picks_view(&mut state, &mut protocols, &picker);
+                        }
+                    }
                     Action::AppendChar(c) => {
                         state.query.push(c);
                         on_query_change(
@@ -363,7 +385,7 @@ async fn run_event_loop<B: Backend>(
                         state.cache_insert(query.clone(), rows.clone(), icons.clone());
                         if query == state.query {
                             protocols = build_protocols(&icons, &picker);
-                            state.set_rows(rows);
+                            state.set_rows(rows, icons);
                             state.status = Status::Idle;
                         }
                     }
@@ -376,6 +398,31 @@ async fn run_event_loop<B: Backend>(
             }
         }
     }
+}
+
+/// Swap the body into "review your picks" mode: rows/icons come from
+/// `state.picked` / `state.picked_icons`, protocols are rebuilt. When
+/// there are no picks, the body collapses back to empty (the render
+/// path then shows the "Type to search" placeholder).
+///
+/// Called whenever the empty-query view needs to reconcile with the
+/// current pick set — on backspace-to-empty, and on un-pick while the
+/// picks-view is already showing.
+fn refresh_picks_view(
+    state: &mut PickerState,
+    protocols: &mut Vec<Option<StatefulProtocol>>,
+    picker: &Picker,
+) {
+    if state.picked.is_empty() {
+        state.set_rows(Vec::new(), Vec::new());
+        protocols.clear();
+    } else {
+        let rows = state.picked.clone();
+        let icons = state.picked_icons.clone();
+        *protocols = build_protocols(&icons, picker);
+        state.set_rows(rows, icons);
+    }
+    state.status = Status::Idle;
 }
 
 /// Called after the user edits the query. Cancels any pending fetch,
@@ -395,16 +442,16 @@ fn on_query_change(
     }
 
     if state.query.is_empty() {
-        state.set_rows(Vec::new());
-        protocols.clear();
-        state.status = Status::Idle;
+        refresh_picks_view(state, protocols, picker);
         *debounce_active = false;
         return;
     }
 
     if let Some((rows, icons)) = state.cache.get(&state.query) {
-        *protocols = build_protocols(icons, picker);
-        state.set_rows(rows.clone());
+        let rows = rows.clone();
+        let icons = icons.clone();
+        *protocols = build_protocols(&icons, picker);
+        state.set_rows(rows, icons);
         state.status = Status::Idle;
         *debounce_active = false;
         return;
